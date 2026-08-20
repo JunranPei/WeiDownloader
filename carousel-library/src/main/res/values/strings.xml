@@ -1,0 +1,5 @@
+<resources>
+    <string name="wc_media_thumbnail">Media preview</string>
+    <string name="wc_select_media">Select media</string>
+    <string name="wc_deselect_media">Deselect media</string>
+</resources>
