@@ -1,5 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <color name="platform_weibo">#E6162D</color>
+    <color name="platform_douyin">#111111</color>
+    <color name="platform_neutral">#56423A</color>
     <color name="md_theme_primary">#B84F00</color>
     <color name="md_theme_onPrimary">#FFFFFF</color>
     <color name="md_theme_primaryContainer">#FFDBCA</color>

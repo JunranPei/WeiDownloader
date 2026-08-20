@@ -31,6 +31,8 @@ class SettingsActivity : ComponentActivity() {
     private val loginRequest = 2001
     private val destinationRequest = 2002
     private val preferences by lazy { getSharedPreferences("downloader_settings", Context.MODE_PRIVATE) }
+    private val platformKey by lazy { intent.getStringExtra(EXTRA_PLATFORM).orEmpty() }
+    private val isDouyin get() = platformKey == Platform.DOUYIN.key
     private lateinit var loginStatus: TextView
     private lateinit var loginButton: MaterialButton
     private lateinit var qualityInput: TextView
@@ -49,6 +51,7 @@ class SettingsActivity : ComponentActivity() {
         configureTransparentSystemBars()
         setContentView(R.layout.activity_settings)
         bindViews()
+        configurePlatform()
         configureInsets()
         configureQuality()
         configureLiveCover()
@@ -97,6 +100,19 @@ class SettingsActivity : ComponentActivity() {
         resetDestinationButton.setOnClickListener {
             preferences.edit().remove(PREF_DESTINATION_URI).apply()
             refreshDestination()
+        }
+    }
+
+    private fun configurePlatform() {
+        findViewById<TextView>(R.id.settingsTitle).text = getString(
+            if (isDouyin) R.string.douyin_settings_title else R.string.settings,
+        )
+        findViewById<TextView>(R.id.settingsPlatformSectionTitle).text = getString(
+            if (isDouyin) R.string.douyin_settings else R.string.weibo_account,
+        )
+        if (isDouyin) {
+            loginStatus.text = getString(R.string.douyin_settings_no_login)
+            loginButton.visibility = View.GONE
         }
     }
 
@@ -252,6 +268,10 @@ class SettingsActivity : ComponentActivity() {
 
     private fun refreshLoginState() {
         if (!::loginStatus.isInitialized) return
+        if (isDouyin) {
+            loginStatus.text = getString(R.string.douyin_settings_no_login)
+            return
+        }
         val loggedIn = WeiboSession.isSignedIn()
         loginStatus.text = getString(if (loggedIn) R.string.login_active else R.string.login_inactive)
         loginButton.text = getString(if (loggedIn) R.string.login_again else R.string.login_weibo)
@@ -291,7 +311,8 @@ class SettingsActivity : ComponentActivity() {
 
     private fun toast(value: String) = Toast.makeText(this, value, Toast.LENGTH_SHORT).show()
 
-    private companion object {
-        const val PREF_DESTINATION_URI = "destination_uri"
+    companion object {
+        const val EXTRA_PLATFORM = "platform"
+        private const val PREF_DESTINATION_URI = "destination_uri"
     }
 }

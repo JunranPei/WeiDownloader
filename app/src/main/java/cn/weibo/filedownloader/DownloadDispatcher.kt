@@ -10,7 +10,11 @@ import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 
-class DownloadDispatcher(private val context: Context, private val cookie: String) {
+class DownloadDispatcher(
+    private val context: Context,
+    private val cookie: String,
+    private val platform: Platform = Platform.WEIBO,
+) {
     data class Result(val queued: Int, val alreadyRecorded: Int)
 
     fun enqueueAll(post: WeiboPost, destinationTreeUri: String?): Result =
@@ -46,7 +50,7 @@ class DownloadDispatcher(private val context: Context, private val cookie: Strin
                         .setAllowedOverMetered(true)
                         .setAllowedOverRoaming(false)
                         .addRequestHeader("User-Agent", USER_AGENT)
-                        .addRequestHeader("Referer", REFERER)
+                        .addRequestHeader("Referer", platform.referer)
                         .addRequestHeader("Cookie", cookie)
                         .setDestinationInExternalPublicDir(
                             Environment.DIRECTORY_DOWNLOADS,
@@ -61,6 +65,7 @@ class DownloadDispatcher(private val context: Context, private val cookie: Strin
                         .putString(SafDownloadWorker.KEY_FOLDER, folderName)
                         .putString(SafDownloadWorker.KEY_FILE_NAME, download.suggestedFileName())
                         .putString(SafDownloadWorker.KEY_MEDIA_TYPE, download.type.name)
+                        .putString(SafDownloadWorker.KEY_REFERER, platform.referer)
                         .build()
                     val request = OneTimeWorkRequestBuilder<SafDownloadWorker>()
                         .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
@@ -78,6 +83,11 @@ class DownloadDispatcher(private val context: Context, private val cookie: Strin
 
     private companion object {
         const val USER_AGENT = "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/126 Mobile Safari/537.36"
-        const val REFERER = "https://weibo.com/"
     }
+
+    private val Platform.referer: String
+        get() = when (this) {
+            Platform.WEIBO -> "https://weibo.com/"
+            Platform.DOUYIN -> "https://www.douyin.com/"
+        }
 }

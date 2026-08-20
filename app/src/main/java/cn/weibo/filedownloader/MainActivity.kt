@@ -8,6 +8,7 @@ import android.content.Intent
 import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.graphics.Color
+import android.graphics.drawable.GradientDrawable
 import android.os.Build
 import android.os.Bundle
 import android.view.KeyEvent
@@ -21,6 +22,8 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.widget.doAfterTextChanged
 import androidx.appcompat.content.res.AppCompatResources
+import androidx.core.content.ContextCompat
+import android.content.res.ColorStateList
 import coil.load
 import cn.weibo.carousel.CarouselMediaItem
 import cn.weibo.carousel.WeiboCarouselView
@@ -44,8 +47,12 @@ class MainActivity : Activity() {
     private lateinit var contentScroll: View
     private lateinit var emptyTopSpacer: View
     private lateinit var bottomBar: View
+    private lateinit var weiboTab: TextView
+    private lateinit var douyinTab: TextView
     private var post: WeiboPost? = null
     private var sessionCookie = ""
+    private var platform = Platform.WEIBO
+    private var douyinClient: DouyinClient? = null
     private val selectedUrls = LinkedHashSet<String>()
     private var lastClipboardUrl = ""
     private val clipboardListener = ClipboardManager.OnPrimaryClipChangedListener {
@@ -85,7 +92,11 @@ class MainActivity : Activity() {
         super.onPause()
     }
 
-    override fun onDestroy() { executor.shutdownNow(); super.onDestroy() }
+    override fun onDestroy() {
+        douyinClient?.close()
+        executor.shutdownNow()
+        super.onDestroy()
+    }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
@@ -105,6 +116,13 @@ class MainActivity : Activity() {
         contentScroll = findViewById(R.id.contentScroll)
         emptyTopSpacer = findViewById(R.id.emptyTopSpacer)
         bottomBar = findViewById(R.id.bottomBar)
+        weiboTab = findViewById(R.id.weiboTab)
+        douyinTab = findViewById(R.id.douyinTab)
+        weiboTab.setOnClickListener { switchPlatform(Platform.WEIBO) }
+        douyinTab.setOnClickListener { switchPlatform(Platform.DOUYIN) }
+        installPlatformSwipe(findViewById(R.id.toolbar))
+        installPlatformSwipe(findViewById(R.id.platformSwitcher))
+        updatePlatformUi()
         contentScroll.post { updateContentPosition(hasMedia = false) }
         linkInput.doAfterTextChanged { updatePasteAction(it?.isNotEmpty() == true) }
         linkInput.setOnEditorActionListener { _, actionId, event ->
@@ -151,12 +169,71 @@ class MainActivity : Activity() {
         }
         progress = findViewById(R.id.progress)
         findViewById<View>(R.id.settingsButton).setOnClickListener {
-            startActivity(Intent(this, SettingsActivity::class.java))
+            startActivity(Intent(this, SettingsActivity::class.java).putExtra(SettingsActivity.EXTRA_PLATFORM, platform.key))
         }
         pasteButton.setOnClickListener { pasteFromClipboard() }
         parseButton.setOnClickListener { parsePost() }
         selectAllButton.setOnClickListener { toggleSelectAll() }
         downloadButton.setOnClickListener { enqueueSelectedDownloads() }
+    }
+
+    private fun installPlatformSwipe(view: View) {
+        var downX = 0f
+        var downY = 0f
+        view.setOnTouchListener { _, event ->
+            when (event.actionMasked) {
+                android.view.MotionEvent.ACTION_DOWN -> {
+                    downX = event.x
+                    downY = event.y
+                    false
+                }
+                android.view.MotionEvent.ACTION_UP -> {
+                    val dx = event.x - downX
+                    val dy = event.y - downY
+                    if (kotlin.math.abs(dx) > dpInt(56) && kotlin.math.abs(dx) > kotlin.math.abs(dy) * 1.25f) {
+                        switchPlatform(if (dx < 0) Platform.DOUYIN else Platform.WEIBO)
+                        true
+                    } else false
+                }
+                else -> false
+            }
+        }
+    }
+
+    private fun switchPlatform(value: Platform) {
+        if (platform == value) return
+        platform = value
+        douyinClient?.close()
+        douyinClient = null
+        post = null
+        selectedUrls.clear()
+        mediaCarousel.submitItems(emptyList())
+        mediaCarousel.visibility = View.GONE
+        updateSelectionUi()
+        summaryText.visibility = View.GONE
+        linkInput.text?.clear()
+        updatePlatformUi()
+    }
+
+    private fun updatePlatformUi() {
+        val neutral = ContextCompat.getColor(this, R.color.platform_neutral)
+        updateTab(weiboTab, Platform.WEIBO, platform == Platform.WEIBO, neutral)
+        updateTab(douyinTab, Platform.DOUYIN, platform == Platform.DOUYIN, neutral)
+        linkInput.hint = getString(if (platform == Platform.WEIBO) R.string.link_hint else R.string.douyin_link_hint)
+        val accent = ContextCompat.getColor(this, platform.accentColor)
+        parseButton.backgroundTintList = ColorStateList.valueOf(accent)
+        downloadButton.backgroundTintList = ColorStateList.valueOf(accent)
+        findViewById<TextView>(R.id.downloaderTitle)?.text = getString(R.string.brand_downloader)
+    }
+
+    private fun updateTab(tab: TextView, value: Platform, selected: Boolean, neutral: Int) {
+        val accent = ContextCompat.getColor(this, value.accentColor)
+        tab.background = GradientDrawable().apply {
+            cornerRadius = dpInt(20).toFloat()
+            setColor(if (selected) accent else Color.TRANSPARENT)
+        }
+        tab.setTextColor(if (selected) Color.WHITE else neutral)
+        tab.contentDescription = getString(if (value == Platform.WEIBO) R.string.switch_to_weibo else R.string.switch_to_douyin)
     }
 
     private fun autoFillFromClipboard() {
@@ -167,6 +244,7 @@ class MainActivity : Activity() {
         val mayReplace = current.isBlank() || current == lastClipboardUrl
         if (url != null && url != current && mayReplace) {
             lastClipboardUrl = url
+            adoptPlatformForUrl(url)
             linkInput.setText(url)
             linkInput.setSelection(url.length)
         }
@@ -180,6 +258,7 @@ class MainActivity : Activity() {
             else -> null
         }.orEmpty()
         val url = firstShareUrl(sharedText) ?: return
+        adoptPlatformForUrl(url)
         lastClipboardUrl = url
         linkInput.setText(url)
         linkInput.setSelection(url.length)
@@ -202,7 +281,10 @@ class MainActivity : Activity() {
         val content = clipboardText(clipboard)
         if (content.isBlank()) return toast(getString(R.string.clipboard_empty))
         val url = firstShareUrl(content)
-        if (url != null) lastClipboardUrl = url
+        if (url != null) {
+            lastClipboardUrl = url
+            adoptPlatformForUrl(url)
+        }
         linkInput.setText(url ?: content)
         linkInput.setSelection(linkInput.text?.length ?: 0)
         linkInput.requestFocus()
@@ -224,47 +306,74 @@ class MainActivity : Activity() {
         val candidates = Regex("https?://[^\\s<>\"']+", RegexOption.IGNORE_CASE)
             .findAll(normalized)
             .map { it.value.trimEnd('.', ',', '!', '?', '，', '。', '！', '？', '）', ')', '；', ';', '】', ']') }
-        return candidates.firstOrNull { url ->
-            url.contains("weibo.com", true) || url.contains("weibo.cn", true) || url.contains("t.cn/", true)
-        }
+        return candidates.firstOrNull { isSupportedUrl(it) }
+    }
+
+    private fun isSupportedUrl(url: String): Boolean =
+        url.contains("weibo.com", true) || url.contains("weibo.cn", true) || url.contains("t.cn/", true) ||
+            url.contains("douyin.com", true) || url.contains("iesdouyin.com", true)
+
+    private fun adoptPlatformForUrl(url: String) {
+        val target = if (url.contains("douyin.com", true) || url.contains("iesdouyin.com", true)) Platform.DOUYIN else Platform.WEIBO
+        if (target != platform) switchPlatform(target)
     }
 
     private fun parsePost() {
         val url = linkInput.text?.toString()?.trim().orEmpty()
         if (url.isBlank()) return toast(getString(R.string.link_required))
+        adoptPlatformForUrl(url)
         refreshSession()
         val quality = QualityPreference.fromStored(preferences.getString("quality", QualityPreference.HIGHEST.key).orEmpty())
         busy(true, getString(R.string.reading_post))
+        if (platform == Platform.DOUYIN) {
+            douyinClient?.close()
+            douyinClient = DouyinClient(this)
+            douyinClient?.loadPost(url, quality) { result ->
+                runOnUiThread {
+                    douyinClient?.close()
+                    douyinClient = null
+                    result.fold(
+                        onSuccess = { handleLoadedPost(it) },
+                        onFailure = { handleReadFailure(it) },
+                    )
+                }
+            }
+            return
+        }
         executor.execute {
             try {
                 val includeLiveCover = preferences.getBoolean("live_cover", false)
                 val loaded = WeiboClient(sessionCookie, this, includeLiveCover).loadPost(url, quality)
-                runOnUiThread {
-                    post = loaded
-                    selectedUrls.clear()
-                    val history = DownloadHistory(this)
-                    selectedUrls += loaded.media.filterNot { history.contains(it) }.map { it.url }
-                    showMedia(loaded)
-                    val available = selectedUrls.size
-                    busy(false, getString(R.string.identified_format, loaded.media.size, available, loaded.author))
-                }
+                runOnUiThread { handleLoadedPost(loaded) }
             } catch (error: WeiboLoginRequiredException) {
                 runOnUiThread {
                     busy(false, error.message ?: getString(R.string.login_required_settings))
                     toast(getString(R.string.login_required_settings))
-                    startActivity(Intent(this, SettingsActivity::class.java))
+                    startActivity(Intent(this, SettingsActivity::class.java).putExtra(SettingsActivity.EXTRA_PLATFORM, platform.key))
                 }
             } catch (error: Exception) {
-                runOnUiThread {
-                    post = null
-                    selectedUrls.clear()
-                    mediaCarousel.submitItems(emptyList())
-                    mediaCarousel.visibility = View.GONE
-                    updateSelectionUi()
-                    busy(false, error.message ?: getString(R.string.read_failed))
-                }
+                runOnUiThread { handleReadFailure(error) }
             }
         }
+    }
+
+    private fun handleLoadedPost(loaded: WeiboPost) {
+        post = loaded
+        selectedUrls.clear()
+        val history = DownloadHistory(this)
+        selectedUrls += loaded.media.filterNot { history.contains(it) }.map { it.url }
+        showMedia(loaded)
+        val available = selectedUrls.size
+        busy(false, getString(R.string.identified_format, loaded.media.size, available, loaded.author))
+    }
+
+    private fun handleReadFailure(error: Throwable) {
+        post = null
+        selectedUrls.clear()
+        mediaCarousel.submitItems(emptyList())
+        mediaCarousel.visibility = View.GONE
+        updateSelectionUi()
+        busy(false, error.message ?: getString(if (platform == Platform.WEIBO) R.string.read_failed else R.string.douyin_read_failed))
     }
 
     private fun showMedia(value: WeiboPost, resetCarousel: Boolean = true) {
@@ -384,7 +493,11 @@ class MainActivity : Activity() {
         if (chosen.isEmpty()) return toast(getString(R.string.select_at_least_one))
         val destinationTreeUri = preferences.getString("destination_uri", null)
         try {
-            val result = DownloadDispatcher(this, sessionCookie).enqueueSelected(current, chosen, destinationTreeUri)
+            val result = DownloadDispatcher(
+                this,
+                if (platform == Platform.WEIBO) sessionCookie else "",
+                platform,
+            ).enqueueSelected(current, chosen, destinationTreeUri)
             selectedUrls.removeAll(chosen.map { it.url }.toSet())
             showMedia(current, resetCarousel = false)
             summaryText.text = if (result.queued > 0) {

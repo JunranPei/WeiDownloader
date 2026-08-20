@@ -21,6 +21,7 @@ class SafDownloadWorker(
         val fileName = inputData.getString(KEY_FILE_NAME) ?: return Result.failure()
         val mediaType = inputData.getString(KEY_MEDIA_TYPE).orEmpty()
         val cookie = inputData.getString(KEY_COOKIE).orEmpty()
+        val referer = inputData.getString(KEY_REFERER).orEmpty()
 
         return try {
             val root = DocumentFile.fromTreeUri(applicationContext, treeUri)
@@ -34,7 +35,7 @@ class SafDownloadWorker(
             val existing = folder.findFile(fileName)
             val target = existing ?: folder.createFile(mimeType(fileName, mediaType), fileName)
                 ?: return Result.failure()
-            download(sourceUrl, cookie, target.uri)
+            download(sourceUrl, cookie, referer, target.uri)
             Result.success()
         } catch (error: IOException) {
             if (runAttemptCount < MAX_RETRIES) Result.retry() else Result.failure()
@@ -43,13 +44,13 @@ class SafDownloadWorker(
         }
     }
 
-    private fun download(sourceUrl: String, cookie: String, destination: Uri) {
+    private fun download(sourceUrl: String, cookie: String, referer: String, destination: Uri) {
         val connection = (URL(sourceUrl).openConnection() as HttpURLConnection).apply {
             instanceFollowRedirects = true
             connectTimeout = CONNECT_TIMEOUT_MS
             readTimeout = READ_TIMEOUT_MS
             setRequestProperty("User-Agent", USER_AGENT)
-            setRequestProperty("Referer", REFERER)
+            setRequestProperty("Referer", referer.ifBlank { REFERER })
             if (cookie.isNotBlank()) setRequestProperty("Cookie", cookie)
         }
         try {
@@ -82,6 +83,7 @@ class SafDownloadWorker(
         const val KEY_FOLDER = "folder"
         const val KEY_FILE_NAME = "file_name"
         const val KEY_MEDIA_TYPE = "media_type"
+        const val KEY_REFERER = "referer"
 
         private const val MAX_RETRIES = 3
         private const val CONNECT_TIMEOUT_MS = 20_000
