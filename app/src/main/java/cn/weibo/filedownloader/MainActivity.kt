@@ -208,6 +208,13 @@ class MainActivity : ComponentActivity() {
         installPlatformSwipe(findViewById(R.id.toolbar))
         installPlatformSwipe(brandSwitcher)
         updatePlatformUi()
+        contentScroll.addOnLayoutChangeListener { _, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom ->
+            val sizeChanged = right - left != oldRight - oldLeft || bottom - top != oldBottom - oldTop
+            if (sizeChanged) {
+                updateContentPosition(post?.media?.isNotEmpty() == true)
+                updatePasteAction(linkInput.text?.isNotEmpty() == true)
+            }
+        }
         contentScroll.post { updateContentPosition(hasMedia = false) }
         linkInput.doAfterTextChanged { updatePasteAction(it?.isNotEmpty() == true) }
         linkInput.setOnEditorActionListener { _, actionId, event ->
@@ -268,12 +275,18 @@ class MainActivity : ComponentActivity() {
         douyinClient = null
         post = null
         selectedUrls.clear()
-        mediaCarousel.submitItems(emptyList())
-        mediaCarousel.visibility = View.GONE
+        clearMediaPresentation()
         updateSelectionUi()
         summaryText.visibility = View.GONE
         linkInput.text?.clear()
         updatePlatformUi()
+    }
+
+    private fun clearMediaPresentation() {
+        mediaCarousel.submitItems(emptyList())
+        mediaCarousel.visibility = View.GONE
+        mediaQualitySegments.visibility = View.GONE
+        mediaQualitySegments.setContent {}
     }
 
     private fun updatePlatformUi() {
@@ -546,6 +559,7 @@ class MainActivity : ComponentActivity() {
         }
         if (groups.isEmpty()) {
             mediaQualitySegments.visibility = View.GONE
+            mediaQualitySegments.setContent {}
             return
         }
         val uiGroups = groups.map { group ->
@@ -713,6 +727,7 @@ class MainActivity : ComponentActivity() {
             toolbar.setPadding(toolbarPadding[0] + safe.left, toolbarPadding[1] + safe.top, toolbarPadding[2] + safe.right, toolbarPadding[3])
             scroll.setPadding(scrollPadding[0] + safe.left, scrollPadding[1], scrollPadding[2] + safe.right, scrollPadding[3])
             bottomBar.setPadding(bottomPadding[0] + safe.left, bottomPadding[1], bottomPadding[2] + safe.right, bottomPadding[3] + safe.bottom)
+            scroll.post { updateContentPosition(post?.media?.isNotEmpty() == true) }
             insets
         }
         ViewCompat.requestApplyInsets(root)
