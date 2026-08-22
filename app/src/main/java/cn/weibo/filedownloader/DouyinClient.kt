@@ -33,7 +33,7 @@ class DouyinClient(private val activity: Activity) {
     private var finished = AtomicBoolean(false)
 
     fun loadPost(sharedUrl: String, quality: QualityPreference, callback: (Result<WeiboPost>) -> Unit) {
-        val sourceUrl = normalizeInput(sharedUrl)
+        val sourceUrl = DouyinLinkParser.extractUrl(sharedUrl)
         if (sourceUrl.isBlank()) {
             callback(Result.failure(DouyinException(activity.getString(R.string.douyin_url_not_found))))
             return
@@ -47,7 +47,8 @@ class DouyinClient(private val activity: Activity) {
                     return@post
                 }
                 if (finished.get()) return@post
-                val id = runCatching { resolvePostId(sourceUrl) }.getOrDefault(extractId(sourceUrl))
+                val id = runCatching { resolvePostId(sourceUrl) }
+                    .getOrDefault(DouyinLinkParser.extractPostId(sourceUrl))
                 loadWithWebView(sourceUrl, id, quality) { webResult ->
                     if (finished.getAndSet(true)) return@loadWithWebView
                     removeWebView()
@@ -192,7 +193,7 @@ class DouyinClient(private val activity: Activity) {
     }
 
     private fun resolvePostId(sourceUrl: String): String {
-        extractId(sourceUrl).takeIf(String::isNotBlank)?.let { return it }
+        DouyinLinkParser.extractPostId(sourceUrl).takeIf(String::isNotBlank)?.let { return it }
         val connection = (URL(sourceUrl).openConnection() as HttpURLConnection).apply {
             instanceFollowRedirects = true
             connectTimeout = 20_000
@@ -205,7 +206,7 @@ class DouyinClient(private val activity: Activity) {
         } finally {
             connection.disconnect()
         }
-        return extractId(finalUrl)
+        return DouyinLinkParser.extractPostId(finalUrl)
     }
 
     fun close() {
@@ -233,7 +234,7 @@ class DouyinClient(private val activity: Activity) {
                 settings.userAgentString = WEB_USER_AGENT
                 webViewClient = object : WebViewClient() {
                     override fun onPageFinished(view: WebView, url: String) {
-                        pollPage(view, sourceUrl, extractId(url).ifBlank { postId }, quality, 0, callback)
+                        pollPage(view, sourceUrl, DouyinLinkParser.extractPostId(url).ifBlank { postId }, quality, 0, callback)
                     }
                 }
                 webChromeClient = WebChromeClient()
@@ -260,7 +261,7 @@ class DouyinClient(private val activity: Activity) {
         if (finished.get()) return
         if (postId.isBlank()) {
             if (attempt < MAX_PAGE_POLLS) {
-                handler.postDelayed({ pollPage(view, sourceUrl, extractId(view.url.orEmpty()), quality, attempt + 1, callback) }, PAGE_POLL_DELAY_MS)
+                handler.postDelayed({ pollPage(view, sourceUrl, DouyinLinkParser.extractPostId(view.url.orEmpty()), quality, attempt + 1, callback) }, PAGE_POLL_DELAY_MS)
             } else {
                 callback(Result.failure(DouyinException(activity.getString(R.string.douyin_page_no_media))))
             }
@@ -314,10 +315,11 @@ class DouyinClient(private val activity: Activity) {
     }
 
     private fun loadFromHtml(sourceUrl: String, @Suppress("UNUSED_PARAMETER") quality: QualityPreference): WeiboPost {
-        val inputId = extractId(sourceUrl)
+        val inputId = DouyinLinkParser.extractPostId(sourceUrl)
         val requestUrl = when {
             inputId.isBlank() -> sourceUrl
-            sourceUrl.contains("/note/", true) -> "https://www.douyin.com/note/$inputId?source=Googlebot"
+            sourceUrl.contains("/note/", true) || sourceUrl.contains("/slides/", true) ->
+                "https://www.douyin.com/note/$inputId?source=Googlebot"
             else -> "https://www.douyin.com/video/$inputId?source=Googlebot"
         }
         val connection = (URL(requestUrl).openConnection() as HttpURLConnection).apply {
@@ -335,7 +337,8 @@ class DouyinClient(private val activity: Activity) {
         } finally {
             connection.disconnect()
         }
-        val id = extractId(connection.url?.toString().orEmpty()).ifBlank { extractId(sourceUrl) }
+        val id = DouyinLinkParser.extractPostId(connection.url?.toString().orEmpty())
+            .ifBlank { DouyinLinkParser.extractPostId(sourceUrl) }
         if (id.isBlank() || !body.contains(id)) throw DouyinException(activity.getString(R.string.douyin_no_media))
         return parseJsonLdPost(body, sourceUrl, id)
             ?: throw DouyinException(activity.getString(R.string.douyin_no_media))
@@ -427,20 +430,13 @@ class DouyinClient(private val activity: Activity) {
         webView = null
     }
 
-    private fun normalizeInput(value: String): String {
-        val cleaned = value.trim().replace("\\u002F", "/").replace("\\/", "/")
-        return (Regex("https?://[^\\s]+", RegexOption.IGNORE_CASE).find(cleaned)?.value ?: cleaned)
-            .trimEnd('.', ',', '!', '?', '，', '。', '！', '？', '）', ')', '；', ';')
-    }
-
     private fun toSharePage(url: String, id: String): String = when {
         url.contains("iesdouyin.com", true) -> url
-        url.contains("/note/", true) && id.isNotBlank() -> "https://www.douyin.com/note/$id"
+        (url.contains("/note/", true) || url.contains("/slides/", true)) && id.isNotBlank() ->
+            "https://www.douyin.com/note/$id"
         id.isNotBlank() -> "https://www.douyin.com/video/$id"
         else -> url
     }
-
-    private fun extractId(value: String): String = Regex("(?:/video/|/share/video/|/note/)(\\d+)").find(value)?.groupValues?.getOrNull(1).orEmpty()
 
     private fun qualityKey(@Suppress("UNUSED_PARAMETER") quality: QualityPreference): String =
         MediaQuality.HD_BEST
@@ -544,4 +540,18 @@ internal object DouyinContentPolicy {
     }
 
     private fun isHttp(value: String): Boolean = value.startsWith("https://", true) || value.startsWith("http://", true)
+}
+
+internal object DouyinLinkParser {
+    private val urlRegex = Regex("https?://[^\\s\\[\\]()<>]+", RegexOption.IGNORE_CASE)
+    private val postIdRegex = Regex("/(?:share/)?(?:video|note|slides)/(\\d+)", RegexOption.IGNORE_CASE)
+
+    fun extractUrl(value: String): String {
+        val cleaned = value.trim().replace("\\u002F", "/").replace("\\/", "/")
+        return (urlRegex.find(cleaned)?.value ?: cleaned)
+            .trimEnd('.', ',', '!', '?', '，', '。', '！', '？', '）', ')', ']', '；', ';')
+    }
+
+    fun extractPostId(value: String): String =
+        postIdRegex.find(value)?.groupValues?.getOrNull(1).orEmpty()
 }
