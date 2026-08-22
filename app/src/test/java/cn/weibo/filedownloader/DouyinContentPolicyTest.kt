@@ -161,4 +161,28 @@ class DouyinContentPolicyTest {
         assertEquals(2, work?.media?.single()?.variants?.size)
         assertNull(DouyinWorkNormalizer.normalize(detail, "7674552954225867688"))
     }
+
+    @Test fun acceptsDynamicCoverWhenStaticCoverFieldIsMissing() {
+        val detail = JSONObject(
+            """
+            {
+              "aweme_id": "7385481927806979362",
+              "video": {
+                "play_addr": {
+                  "width": 1920,
+                  "height": 1080,
+                  "url_list": ["https://v3-web.douyinvod.com/video/tos/cn/source/"]
+                },
+                "dynamic_cover": {
+                  "url_list": ["https://p3-sign.douyinpic.com/tos-cn-i-0813/video-cover.jpeg"]
+                }
+              }
+            }
+            """.trimIndent(),
+        )
+
+        val media = DouyinWorkNormalizer.normalize(detail, "7385481927806979362")?.media?.single()
+
+        assertEquals("https://p3-sign.douyinpic.com/tos-cn-i-0813/video-cover.jpeg", media?.thumbnailUrl)
+    }
 }

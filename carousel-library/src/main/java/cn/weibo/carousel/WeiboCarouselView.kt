@@ -72,7 +72,7 @@ class WeiboCarouselView @JvmOverloads constructor(
 
     var onSelectionChanged: ((CarouselMediaItem, Boolean) -> Unit)? = null
     var onItemClick: ((CarouselMediaItem) -> Unit)? = null
-    var thumbnailBinder: ((android.widget.ImageView, String) -> Unit)?
+    var thumbnailBinder: ((android.widget.ImageView, String, String) -> Unit)?
         get() = carouselAdapter.thumbnailBinder
         set(value) {
             carouselAdapter.thumbnailBinder = value

@@ -247,7 +247,10 @@ internal object DouyinWorkNormalizer {
         val ranked = MediaVariantSelector.rank(type, variants)
         val best = ranked.first()
         val poster = coverUrl.ifBlank {
-            video.optObjectFrom("origin_cover", "originCover", "cover")?.let(::preferredThumbnailUrl).orEmpty()
+            VIDEO_THUMBNAIL_FIELDS.asSequence()
+                .mapNotNull { preferredThumbnailUrl(video.opt(it)) }
+                .firstOrNull()
+                .orEmpty()
         }
         return MediaItem(
             type = type,
@@ -336,6 +339,17 @@ internal object DouyinWorkNormalizer {
         "playAddr265",
     )
     private val VIDEO_URL_FIELDS = listOf("url_list", "urlList", "src", "url")
+    private val VIDEO_THUMBNAIL_FIELDS = listOf(
+        "origin_cover",
+        "originCover",
+        "cover_original",
+        "coverOriginal",
+        "cover",
+        "dynamic_cover",
+        "dynamicCover",
+        "animated_cover",
+        "animatedCover",
+    )
     private val URL_CONTAINER_FIELDS = listOf(
         "url_list",
         "urlList",

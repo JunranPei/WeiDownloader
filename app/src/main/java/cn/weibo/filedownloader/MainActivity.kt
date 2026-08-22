@@ -13,6 +13,7 @@ import android.view.KeyEvent
 import android.view.View
 import android.view.inputmethod.EditorInfo
 import android.widget.EditText
+import android.widget.ImageView
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.ComponentActivity
@@ -26,7 +27,10 @@ import androidx.appcompat.content.res.AppCompatResources
 import androidx.core.content.ContextCompat
 import android.content.res.ColorStateList
 import android.content.res.Configuration
+import coil.ImageLoader
+import coil.decode.VideoFrameDecoder
 import coil.load
+import coil.request.videoFrameMillis
 import cn.weibo.carousel.CarouselMediaItem
 import cn.weibo.carousel.WeiboCarouselView
 import com.google.android.material.button.MaterialButton
@@ -36,6 +40,11 @@ import java.util.concurrent.Executors
 class MainActivity : ComponentActivity() {
     override fun attachBaseContext(newBase: Context) { super.attachBaseContext(ThemeController.wrap(newBase)) }
     private val executor = Executors.newSingleThreadExecutor()
+    private val videoFrameImageLoader by lazy(LazyThreadSafetyMode.NONE) {
+        ImageLoader.Builder(this)
+            .components { add(VideoFrameDecoder.Factory()) }
+            .build()
+    }
     private lateinit var preferences: SharedPreferences
     private lateinit var pasteButton: MaterialButton
     private lateinit var parseButton: MaterialButton
@@ -79,6 +88,63 @@ class MainActivity : ComponentActivity() {
         if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.P && checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(arrayOf(Manifest.permission.WRITE_EXTERNAL_STORAGE), 10)
         }
+    }
+
+    private fun bindMediaThumbnail(image: ImageView, thumbnailUrl: String, fallbackVideoUrl: String) {
+        val requestKey = "$thumbnailUrl\n$fallbackVideoUrl"
+        image.tag = requestKey
+        if (thumbnailUrl.isBlank()) {
+            bindVideoFrame(image, fallbackVideoUrl, requestKey)
+            return
+        }
+        image.load(thumbnailUrl) {
+            crossfade(false)
+            placeholder(null)
+            error(null)
+            listener(
+                onStart = {
+                    if (image.tag == requestKey) hideMediaThumbnail(image)
+                },
+                onSuccess = { _, _ ->
+                    if (image.tag == requestKey) image.alpha = 1f
+                },
+                onError = { _, _ ->
+                    image.post {
+                        if (image.tag == requestKey) bindVideoFrame(image, fallbackVideoUrl, requestKey)
+                    }
+                },
+            )
+        }
+    }
+
+    private fun bindVideoFrame(image: ImageView, videoUrl: String, requestKey: String) {
+        if (videoUrl.isBlank()) {
+            hideMediaThumbnail(image)
+            return
+        }
+        image.load(videoUrl, videoFrameImageLoader) {
+            videoFrameMillis(500)
+            crossfade(false)
+            placeholder(null)
+            error(null)
+            listener(
+                onStart = {
+                    if (image.tag == requestKey) hideMediaThumbnail(image)
+                },
+                onSuccess = { _, _ ->
+                    if (image.tag == requestKey) image.alpha = 1f
+                },
+                onError = { _, _ ->
+                    if (image.tag == requestKey) hideMediaThumbnail(image)
+                },
+            )
+        }
+    }
+
+    private fun hideMediaThumbnail(image: ImageView) {
+        image.animate().cancel()
+        image.alpha = 0f
+        image.setImageDrawable(null)
     }
 
     override fun onResume() {
@@ -151,31 +217,7 @@ class MainActivity : ComponentActivity() {
             requested
         }
         updatePasteAction(linkInput.text?.isNotEmpty() == true)
-        mediaCarousel.thumbnailBinder = { image, url ->
-            if (url.isBlank()) {
-                image.animate().cancel()
-                image.alpha = 0f
-                image.setImageDrawable(null)
-            } else {
-                image.load(url) {
-                    crossfade(false)
-                    placeholder(null)
-                    error(null)
-                    listener(
-                        onStart = {
-                            image.animate().cancel()
-                            image.alpha = 0f
-                            image.setImageDrawable(null)
-                        },
-                        onSuccess = { _, _ -> image.alpha = 1f },
-                        onError = { _, _ ->
-                            image.setImageDrawable(null)
-                            image.alpha = 0f
-                        },
-                    )
-                }
-            }
-        }
+        mediaCarousel.thumbnailBinder = ::bindMediaThumbnail
         mediaCarousel.onSelectionChanged = { item, selected ->
             if (selected) selectedUrls += item.id else selectedUrls -= item.id
             updateSelectionUi()
@@ -466,6 +508,9 @@ class MainActivity : ComponentActivity() {
             CarouselMediaItem(
                 id = item.url,
                 imageUrl = preview,
+                fallbackImageUrl = item.url.takeIf {
+                    item.type == MediaType.VIDEO || item.type == MediaType.LIVE_PHOTO
+                }.orEmpty(),
                 title = "${index + 1}. ${getString(item.type.labelRes)} · $qualityLabel",
                 subtitle = item.suggestedFileName(),
                 selected = selectedUrls.contains(item.url),

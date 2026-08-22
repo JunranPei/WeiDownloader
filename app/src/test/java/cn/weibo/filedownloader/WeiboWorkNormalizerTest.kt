@@ -114,6 +114,37 @@ class WeiboWorkNormalizerTest {
         assertEquals(2, media.variants.size)
     }
 
+    @Test
+    fun findsVideoPosterInsideNestedMediaInfo() {
+        val playInfo = JSONObject(
+            """
+            {
+              "nickname": "author",
+              "urls": {
+                "高清 1080P": "https://f.video.weibocdn.com/video.mp4"
+              },
+              "media_info": {
+                "poster_url": "https://wx1.sinaimg.cn/large/video-poster.jpg"
+              }
+            }
+            """.trimIndent(),
+        )
+
+        val media = normalizer()
+            .normalizeVideoComponent(playInfo, "1034:123456789", QualityPreference.HIGHEST, "unknown")
+            ?.media
+            ?.single()
+
+        assertEquals("https://wx1.sinaimg.cn/large/video-poster.jpg", media?.thumbnailUrl)
+    }
+
     private fun normalizer(includeLiveCover: Boolean = false) =
-        WeiboWorkNormalizer(cookie = "", includeLiveCover = includeLiveCover)
+        WeiboWorkNormalizer(
+            cookie = "",
+            includeLiveCover = includeLiveCover,
+            metadataProbe = object : WeiboMediaMetadataProbe {
+                override fun imageDimensions(url: String): Pair<Int, Int>? = null
+                override fun mediaMetadata(url: String): WeiboMediaProbeResult? = null
+            },
+        )
 }

@@ -606,10 +606,18 @@ internal class WeiboWorkNormalizer(
         return null
     }
 
-    private fun thumbnailFrom(data: JSONObject): String = listOf(
-        "page_pic", "pagePic", "cover_image", "cover_url", "cover", "poster", "pic", "thumbnail", "big_pic",
-    ).asSequence().mapNotNull { urlValue(data.opt(it)) }.firstOrNull()
-        ?: data.optJSONObject("big_pic_info")?.let { chooseImage(it, QualityPreference.HIGHEST) }.orEmpty()
+    private fun thumbnailFrom(data: JSONObject, depth: Int = 0): String {
+        THUMBNAIL_FIELDS.asSequence()
+            .mapNotNull { urlValue(data.opt(it)) }
+            .firstOrNull(::isImageVariantUrl)
+            ?.let { return it }
+        if (depth >= 2) return ""
+        return THUMBNAIL_CONTAINER_FIELDS.asSequence()
+            .mapNotNull { data.optJSONObject(it) }
+            .map { thumbnailFrom(it, depth + 1) }
+            .firstOrNull(String::isNotBlank)
+            .orEmpty()
+    }
 
     private fun urlValue(value: Any?): String? = when (value) {
         is String -> normalizeUrl(value)
@@ -768,5 +776,15 @@ internal class WeiboWorkNormalizer(
 
     private companion object {
         const val IMAGE_VARIANT_ORIGINAL = "original"
+        val THUMBNAIL_FIELDS = listOf(
+            "page_pic", "pagePic", "page_pic_url", "pagePicUrl",
+            "cover_image", "coverImage", "cover_image_url", "coverImageUrl",
+            "cover_url", "coverUrl", "cover", "poster", "poster_url", "posterUrl",
+            "pic", "pic_url", "picUrl", "thumbnail", "thumbnail_url", "thumbnailUrl",
+            "big_pic", "image", "image_url", "snapshot", "snapshot_url",
+        )
+        val THUMBNAIL_CONTAINER_FIELDS = listOf(
+            "big_pic_info", "page_info", "media_info", "video_info", "video_details", "play_info", "data",
+        )
     }
 }

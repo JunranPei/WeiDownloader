@@ -4,6 +4,7 @@ package cn.weibo.carousel
 data class CarouselMediaItem(
     val id: String,
     val imageUrl: String,
+    val fallbackImageUrl: String = "",
     val title: CharSequence,
     val subtitle: CharSequence,
     val selected: Boolean = false,

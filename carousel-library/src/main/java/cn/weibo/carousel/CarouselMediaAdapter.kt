@@ -23,7 +23,7 @@ internal class CarouselMediaAdapter(
     private var items: List<CarouselMediaItem> = emptyList()
     private var cardWidthPx: Int = 0
     private var cardSpacingPx: Int = 0
-    var thumbnailBinder: ((android.widget.ImageView, String) -> Unit)? = null
+    var thumbnailBinder: ((android.widget.ImageView, String, String) -> Unit)? = null
 
     fun setCardGeometry(widthPx: Int, spacingPx: Int) {
         if (widthPx <= 0) return
@@ -115,7 +115,7 @@ internal class CarouselMediaAdapter(
             renderSelection(item)
             setVisibleWidth(root.width)
             if (thumbnailBinder != null) {
-                thumbnailBinder?.invoke(thumbnail, item.imageUrl)
+                thumbnailBinder?.invoke(thumbnail, item.imageUrl, item.fallbackImageUrl)
             } else {
                 thumbnail.setImageDrawable(null)
                 thumbnail.alpha = 0f
