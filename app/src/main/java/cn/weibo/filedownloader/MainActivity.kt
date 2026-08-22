@@ -23,6 +23,7 @@ import androidx.core.widget.doAfterTextChanged
 import androidx.appcompat.content.res.AppCompatResources
 import androidx.core.content.ContextCompat
 import android.content.res.ColorStateList
+import android.content.res.Configuration
 import coil.load
 import cn.weibo.carousel.CarouselMediaItem
 import cn.weibo.carousel.WeiboCarouselView
@@ -217,15 +218,48 @@ class MainActivity : Activity() {
 
     private fun updatePlatformUi() {
         linkInput.hint = getString(if (platform == Platform.WEIBO) R.string.link_hint else R.string.douyin_link_hint)
-        val accent = ContextCompat.getColor(this, platform.accentColor)
+        val prefixColor = ContextCompat.getColor(this, platform.prefixColor)
+        val actionColor = ContextCompat.getColor(this, platform.actionColor)
+        val onActionColor = ContextCompat.getColor(this, platform.onActionColor)
         platformPrefix.text = platform.shortName
-        platformPrefix.setTextColor(accent)
+        val downloaderTitle = findViewById<TextView>(R.id.downloaderTitle)
+        downloaderTitle.text = getString(R.string.brand_downloader)
+        if (platform == Platform.DOUYIN) {
+            val night = resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK == Configuration.UI_MODE_NIGHT_YES
+            val foreground = if (night) {
+                themedColor(com.google.android.material.R.attr.colorOnSurface)
+            } else {
+                actionColor
+            }
+            val shadowOffset = dpInt(-2).toFloat()
+            platformPrefix.setTextColor(foreground)
+            platformPrefix.setShadowLayer(0.01f, shadowOffset, 0f, prefixColor)
+            downloaderTitle.setTextColor(themedColor(com.google.android.material.R.attr.colorOnSurface))
+            downloaderTitle.setShadowLayer(0f, 0f, 0f, Color.TRANSPARENT)
+        } else {
+            platformPrefix.setTextColor(prefixColor)
+            platformPrefix.setShadowLayer(0f, 0f, 0f, Color.TRANSPARENT)
+            downloaderTitle.setTextColor(themedColor(com.google.android.material.R.attr.colorOnSurface))
+            downloaderTitle.setShadowLayer(0f, 0f, 0f, Color.TRANSPARENT)
+        }
         brandSwitcher.contentDescription = getString(
             if (platform == Platform.WEIBO) R.string.switch_to_douyin else R.string.switch_to_weibo,
         )
-        parseButton.backgroundTintList = ColorStateList.valueOf(accent)
-        downloadButton.backgroundTintList = ColorStateList.valueOf(accent)
-        findViewById<TextView>(R.id.downloaderTitle)?.text = getString(R.string.brand_downloader)
+        parseButton.backgroundTintList = ColorStateList.valueOf(actionColor)
+        parseButton.iconTint = ColorStateList.valueOf(onActionColor)
+        downloadButton.backgroundTintList = ColorStateList.valueOf(actionColor)
+        downloadButton.setTextColor(onActionColor)
+        val douyinStroke = if (platform == Platform.DOUYIN) dpInt(1) else 0
+        parseButton.strokeWidth = douyinStroke
+        parseButton.strokeColor = ColorStateList.valueOf(prefixColor)
+        downloadButton.strokeWidth = douyinStroke
+        downloadButton.strokeColor = ColorStateList.valueOf(prefixColor)
+    }
+
+    private fun themedColor(attribute: Int): Int {
+        val value = android.util.TypedValue()
+        theme.resolveAttribute(attribute, value, true)
+        return if (value.resourceId != 0) ContextCompat.getColor(this, value.resourceId) else value.data
     }
 
     private fun autoFillFromClipboard() {
