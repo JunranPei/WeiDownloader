@@ -88,6 +88,7 @@
     <string name="link_required">Paste a Weibo post link first.</string>
     <string name="login_required_settings">Sign in to Weibo from Settings first.</string>
     <string name="reading_post">Reading this Weibo post…</string>
+    <string name="reading_douyin">Reading this Douyin video…</string>
     <string name="identified_format">Found %1$d files · %2$d available · %3$s</string>
     <string name="read_failed">Could not read the post. Try again later.</string>
     <string name="recorded">Downloaded</string>
@@ -112,6 +113,7 @@
     <string name="url_not_found">No Weibo URL was found. Paste the complete content from Weibo’s “Copy link” action.</string>
     <string name="switch_to_weibo">Switch to Weibo</string>
     <string name="switch_to_douyin">Switch to Douyin</string>
+    <string name="switch_platform">Switch download platform</string>
     <string name="douyin_url_not_found">No recognizable Douyin link was found.</string>
     <string name="douyin_no_media">No downloadable video was found on the Douyin page.</string>
     <string name="douyin_page_no_media">The Douyin page did not return a downloadable video. Try again later.</string>

@@ -8,7 +8,6 @@ import android.content.Intent
 import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.graphics.Color
-import android.graphics.drawable.GradientDrawable
 import android.os.Build
 import android.os.Bundle
 import android.view.KeyEvent
@@ -47,8 +46,8 @@ class MainActivity : Activity() {
     private lateinit var contentScroll: View
     private lateinit var emptyTopSpacer: View
     private lateinit var bottomBar: View
-    private lateinit var weiboTab: TextView
-    private lateinit var douyinTab: TextView
+    private lateinit var platformPrefix: TextView
+    private lateinit var brandSwitcher: View
     private var post: WeiboPost? = null
     private var sessionCookie = ""
     private var platform = Platform.WEIBO
@@ -116,12 +115,13 @@ class MainActivity : Activity() {
         contentScroll = findViewById(R.id.contentScroll)
         emptyTopSpacer = findViewById(R.id.emptyTopSpacer)
         bottomBar = findViewById(R.id.bottomBar)
-        weiboTab = findViewById(R.id.weiboTab)
-        douyinTab = findViewById(R.id.douyinTab)
-        weiboTab.setOnClickListener { switchPlatform(Platform.WEIBO) }
-        douyinTab.setOnClickListener { switchPlatform(Platform.DOUYIN) }
+        platformPrefix = findViewById(R.id.platformPrefix)
+        brandSwitcher = findViewById(R.id.brandSwitcher)
+        brandSwitcher.setOnClickListener {
+            switchPlatform(if (platform == Platform.WEIBO) Platform.DOUYIN else Platform.WEIBO)
+        }
         installPlatformSwipe(findViewById(R.id.toolbar))
-        installPlatformSwipe(findViewById(R.id.platformSwitcher))
+        installPlatformSwipe(brandSwitcher)
         updatePlatformUi()
         contentScroll.post { updateContentPosition(hasMedia = false) }
         linkInput.doAfterTextChanged { updatePasteAction(it?.isNotEmpty() == true) }
@@ -216,24 +216,16 @@ class MainActivity : Activity() {
     }
 
     private fun updatePlatformUi() {
-        val neutral = ContextCompat.getColor(this, R.color.platform_neutral)
-        updateTab(weiboTab, Platform.WEIBO, platform == Platform.WEIBO, neutral)
-        updateTab(douyinTab, Platform.DOUYIN, platform == Platform.DOUYIN, neutral)
         linkInput.hint = getString(if (platform == Platform.WEIBO) R.string.link_hint else R.string.douyin_link_hint)
         val accent = ContextCompat.getColor(this, platform.accentColor)
+        platformPrefix.text = platform.shortName
+        platformPrefix.setTextColor(accent)
+        brandSwitcher.contentDescription = getString(
+            if (platform == Platform.WEIBO) R.string.switch_to_douyin else R.string.switch_to_weibo,
+        )
         parseButton.backgroundTintList = ColorStateList.valueOf(accent)
         downloadButton.backgroundTintList = ColorStateList.valueOf(accent)
         findViewById<TextView>(R.id.downloaderTitle)?.text = getString(R.string.brand_downloader)
-    }
-
-    private fun updateTab(tab: TextView, value: Platform, selected: Boolean, neutral: Int) {
-        val accent = ContextCompat.getColor(this, value.accentColor)
-        tab.background = GradientDrawable().apply {
-            cornerRadius = dpInt(20).toFloat()
-            setColor(if (selected) accent else Color.TRANSPARENT)
-        }
-        tab.setTextColor(if (selected) Color.WHITE else neutral)
-        tab.contentDescription = getString(if (value == Platform.WEIBO) R.string.switch_to_weibo else R.string.switch_to_douyin)
     }
 
     private fun autoFillFromClipboard() {
@@ -324,7 +316,12 @@ class MainActivity : Activity() {
         adoptPlatformForUrl(url)
         refreshSession()
         val quality = QualityPreference.fromStored(preferences.getString("quality", QualityPreference.HIGHEST.key).orEmpty())
-        busy(true, getString(R.string.reading_post))
+        post = null
+        selectedUrls.clear()
+        mediaCarousel.submitItems(emptyList())
+        mediaCarousel.visibility = View.GONE
+        updateSelectionUi()
+        busy(true, getString(if (platform == Platform.WEIBO) R.string.reading_post else R.string.reading_douyin))
         if (platform == Platform.DOUYIN) {
             douyinClient?.close()
             douyinClient = DouyinClient(this)

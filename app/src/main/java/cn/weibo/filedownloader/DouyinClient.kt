@@ -82,7 +82,7 @@ class DouyinClient(private val activity: Activity) {
                 settings.javaScriptEnabled = true
                 settings.domStorageEnabled = true
                 settings.mediaPlaybackRequiresUserGesture = false
-                settings.userAgentString = MOBILE_USER_AGENT
+                settings.userAgentString = WEB_USER_AGENT
                 webViewClient = object : WebViewClient() {
                     override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
                         captureMediaUrl(request.url.toString())
@@ -96,13 +96,17 @@ class DouyinClient(private val activity: Activity) {
                     }
 
                     override fun onPageFinished(view: WebView, url: String) {
-                        pollPage(view, sourceUrl, postId, quality, 0, callback)
+                        pollPage(view, sourceUrl, extractId(url).ifBlank { postId }, quality, 0, callback)
                     }
                 }
                 webChromeClient = WebChromeClient()
             }
             webView = view
-            val params = FrameLayout.LayoutParams(2, 2)
+            val params = FrameLayout.LayoutParams(
+                activity.resources.displayMetrics.widthPixels,
+                activity.resources.displayMetrics.heightPixels,
+            )
+            view.translationX = -activity.resources.displayMetrics.widthPixels.toFloat()
             root.addView(view, params)
             view.loadUrl(toSharePage(sourceUrl, postId))
         }
@@ -136,7 +140,7 @@ class DouyinClient(private val activity: Activity) {
             data.optString("video"),
             data.optString("resource"),
             capturedMediaUrl,
-        ).firstOrNull { it.startsWith("http", true) && !it.startsWith("blob:", true) }
+        ).firstOrNull { isLikelyMediaUrl(it) }
             ?: return null
         val title = data.optString("title").ifBlank { activity.getString(R.string.douyin_default_title) }
         val author = data.optString("author").ifBlank { activity.getString(R.string.douyin_default_author) }
@@ -155,7 +159,7 @@ class DouyinClient(private val activity: Activity) {
             instanceFollowRedirects = true
             connectTimeout = 20_000
             readTimeout = 30_000
-            setRequestProperty("User-Agent", MOBILE_USER_AGENT)
+            setRequestProperty("User-Agent", SHARE_USER_AGENT)
             setRequestProperty("Accept-Language", "zh-CN,zh;q=0.9")
             setRequestProperty("Referer", "https://www.douyin.com/")
         }
@@ -170,7 +174,7 @@ class DouyinClient(private val activity: Activity) {
         val candidates = Regex("https?://[^\\\"'<>\\s]+", RegexOption.IGNORE_CASE)
             .findAll(cleaned)
             .map { it.value.replace("\\u0026", "&") }
-            .filter { it.contains(".mp4", true) || it.contains("video", true) }
+            .filter(::isLikelyMediaUrl)
             .map { it.trimEnd('\\', '"', '\'') }
             .toList()
         val mediaUrl = candidates.firstOrNull() ?: throw DouyinException(activity.getString(R.string.douyin_no_media))
@@ -198,14 +202,18 @@ class DouyinClient(private val activity: Activity) {
     }
 
     private fun captureMediaUrl(url: String) {
-        if (url.startsWith("http", true) && (
-                url.contains(".mp4", true) ||
-                    url.contains(".m3u8", true) ||
-                    url.contains("playwm", true) ||
-                    url.contains("/video/tos/", true)
-            )) {
+        if (isLikelyMediaUrl(url)) {
             capturedMediaUrl = url
         }
+    }
+
+    private fun isLikelyMediaUrl(value: String): Boolean {
+        if (!value.startsWith("http", true) || value.startsWith("blob:", true)) return false
+        val path = runCatching { Uri.parse(value).path.orEmpty().lowercase() }.getOrDefault(value.lowercase())
+        if (NON_MEDIA_SUFFIXES.any(path::endsWith)) return false
+        return path.endsWith(".mp4") || path.endsWith(".m3u8") ||
+            value.contains("playwm", true) || value.contains("/play/", true) ||
+            value.contains("douyinvod.com", true) || value.contains("idouyinvod.com", true)
     }
 
     private fun normalizeInput(value: String): String = value.trim()
@@ -215,7 +223,7 @@ class DouyinClient(private val activity: Activity) {
 
     private fun toSharePage(url: String, id: String): String = when {
         url.contains("iesdouyin.com", true) -> url
-        id.isNotBlank() -> "https://www.iesdouyin.com/share/video/$id"
+        id.isNotBlank() -> "https://www.douyin.com/video/$id"
         else -> url
     }
 
@@ -234,13 +242,15 @@ class DouyinClient(private val activity: Activity) {
     class DouyinException(message: String) : RuntimeException(message)
 
     private companion object {
-        const val MOBILE_USER_AGENT = "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/126 Mobile Safari/537.36"
+        const val WEB_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
+        const val SHARE_USER_AGENT = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1"
+        val NON_MEDIA_SUFFIXES = listOf(".css", ".js", ".json", ".html", ".htm", ".png", ".jpg", ".jpeg", ".webp", ".gif", ".svg", ".woff", ".woff2", ".ttf")
         const val PAGE_POLL_DELAY_MS = 450L
         const val MAX_PAGE_POLLS = 18
         val EXTRACT_SCRIPT = """
             (function() {
               const video = document.querySelector('video');
-              const resources = performance.getEntriesByType('resource').map(e => e.name || '').filter(u => /\.mp4|video/i.test(u));
+              const resources = performance.getEntriesByType('resource').map(e => e.name || '').filter(u => /\.mp4(?:\?|${'$'})|\.m3u8(?:\?|${'$'})|douyinvod\.com|idouyinvod\.com|playwm/i.test(u));
               const title = document.querySelector("meta[name='description']")?.content || document.title || '';
               const author = document.querySelector("[class*='author']")?.textContent || '';
               return JSON.stringify({video: video?.currentSrc || video?.src || '', resource: resources[0] || '', poster: video?.poster || '', title, author});
