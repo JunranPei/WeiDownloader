@@ -55,6 +55,7 @@ class MainActivity : ComponentActivity() {
     private var post: WeiboPost? = null
     private var sessionCookie = ""
     private var platform = Platform.WEIBO
+    private var appliedThemeMode = ThemeController.MODE_SYSTEM
     private var douyinClient: DouyinClient? = null
     private val selectedUrls = LinkedHashSet<String>()
     private var lastClipboardUrl = ""
@@ -67,6 +68,9 @@ class MainActivity : ComponentActivity() {
         WindowCompat.setDecorFitsSystemWindows(window, false)
         configureTransparentSystemBars()
         preferences = getSharedPreferences("downloader_settings", Context.MODE_PRIVATE)
+        appliedThemeMode = storedThemeMode()
+        platform = Platform.entries.firstOrNull { it.key == savedInstanceState?.getString(STATE_PLATFORM) }
+            ?: Platform.WEIBO
         setContentView(R.layout.activity_main)
         bindViews()
         fillFromSharedIntent(intent)
@@ -79,6 +83,10 @@ class MainActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
+        if (::preferences.isInitialized && storedThemeMode() != appliedThemeMode) {
+            recreate()
+            return
+        }
         (getSystemService(CLIPBOARD_SERVICE) as ClipboardManager).addPrimaryClipChangedListener(clipboardListener)
         scheduleClipboardRead()
         refreshSession()
@@ -105,6 +113,11 @@ class MainActivity : ComponentActivity() {
         super.onNewIntent(intent)
         setIntent(intent)
         fillFromSharedIntent(intent)
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        outState.putString(STATE_PLATFORM, platform.key)
+        super.onSaveInstanceState(outState)
     }
 
     private fun bindViews() {
@@ -266,6 +279,11 @@ class MainActivity : ComponentActivity() {
         theme.resolveAttribute(attribute, value, true)
         return if (value.resourceId != 0) ContextCompat.getColor(this, value.resourceId) else value.data
     }
+
+    private fun storedThemeMode(): String = preferences
+        .getString("theme_mode", ThemeController.MODE_SYSTEM)
+        .orEmpty()
+        .ifBlank { ThemeController.MODE_SYSTEM }
 
     private fun autoFillFromClipboard() {
         if (!::linkInput.isInitialized || !hasWindowFocus()) return
@@ -671,4 +689,8 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun toast(value: String) = Toast.makeText(this, value, Toast.LENGTH_SHORT).show()
+
+    private companion object {
+        const val STATE_PLATFORM = "state_platform"
+    }
 }

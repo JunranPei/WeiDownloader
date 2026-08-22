@@ -2,6 +2,7 @@ package cn.weibo.filedownloader
 
 import android.app.Activity
 import android.graphics.Color
+import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.os.Handler
 import android.os.Looper
@@ -47,10 +48,14 @@ class DouyinClient(private val activity: Activity) {
             if (finished.getAndSet(true)) return@loadWithWebView
             removeWebView()
             if (webResult.isSuccess) {
-                callback(webResult)
+                executor.execute {
+                    val post = webResult.getOrThrow()
+                    val hydrated = runCatching { hydrateMediaMetadata(post) }.getOrDefault(post)
+                    handler.post { callback(Result.success(hydrated)) }
+                }
             } else {
                 executor.execute {
-                    val fallback = runCatching { loadFromHtml(sourceUrl, quality) }
+                    val fallback = runCatching { hydrateMediaMetadata(loadFromHtml(sourceUrl, quality)) }
                     handler.post {
                         if (fallback.isSuccess) callback(fallback)
                         else callback(Result.failure(webResult.exceptionOrNull() ?: fallback.exceptionOrNull() ?: DouyinException(activity.getString(R.string.douyin_no_media))))
@@ -192,6 +197,52 @@ class DouyinClient(private val activity: Activity) {
         )
     }
 
+    private fun hydrateMediaMetadata(post: WeiboPost): WeiboPost = post.copy(
+        media = post.media.map { item ->
+            if (item.type != MediaType.VIDEO && item.type != MediaType.LIVE_PHOTO && item.type != MediaType.AUDIO) {
+                return@map item
+            }
+            val probe = probeMedia(item.url) ?: return@map item
+            val key = when {
+                probe.height > 0 -> "${probe.height}p"
+                probe.bitrate > 0L -> "${(probe.bitrate / 1000L).coerceAtLeast(1L)} kbps"
+                else -> "best available"
+            }
+            val variant = MediaVariant(
+                key = key,
+                url = item.url,
+                width = probe.width,
+                height = probe.height,
+                bitrate = probe.bitrate,
+            )
+            item.copy(variants = listOf(variant), selectedVariantKey = key)
+        },
+    )
+
+    private data class MediaProbe(val width: Int, val height: Int, val bitrate: Long)
+
+    private fun probeMedia(url: String): MediaProbe? {
+        val retriever = MediaMetadataRetriever()
+        return try {
+            retriever.setDataSource(
+                url,
+                mapOf(
+                    "User-Agent" to DOWNLOAD_USER_AGENT,
+                    "Referer" to "https://www.douyin.com/",
+                ),
+            )
+            MediaProbe(
+                width = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toIntOrNull() ?: 0,
+                height = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toIntOrNull() ?: 0,
+                bitrate = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_BITRATE)?.toLongOrNull() ?: 0L,
+            ).takeIf { it.width > 0 || it.height > 0 || it.bitrate > 0L }
+        } catch (_: Exception) {
+            null
+        } finally {
+            runCatching { retriever.release() }
+        }
+    }
+
     private fun removeWebView() {
         webView?.let { view ->
             (view.parent as? android.view.ViewGroup)?.removeView(view)
@@ -241,6 +292,7 @@ class DouyinClient(private val activity: Activity) {
     private companion object {
         const val WEB_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
         const val SHARE_USER_AGENT = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1"
+        const val DOWNLOAD_USER_AGENT = "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/126 Mobile Safari/537.36"
         val NON_MEDIA_SUFFIXES = listOf(".css", ".js", ".json", ".html", ".htm", ".png", ".jpg", ".jpeg", ".webp", ".gif", ".svg", ".woff", ".woff2", ".ttf")
         const val PAGE_POLL_DELAY_MS = 450L
         const val MAX_PAGE_POLLS = 18
