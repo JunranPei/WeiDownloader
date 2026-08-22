@@ -40,7 +40,6 @@
     <string name="login_done_waiting">Finish after sign-in</string>
     <string name="login_done_ready">Signed in · Done</string>
     <string name="download_settings">Download settings</string>
-    <string name="default_quality">Default quality</string>
     <string name="live_cover_download">Also download the Live Photo still cover</string>
     <string name="live_cover_title">Live Photo cover</string>
     <string name="live_cover_summary">Save the still image with the motion file</string>
@@ -70,15 +69,14 @@
     <string name="view_github">View project on GitHub</string>
     <string name="version_format">Version %1$s</string>
 
-    <string name="quality_highest">Best available (recommended)</string>
-    <string name="quality_best_short">Best</string>
-    <string name="quality_high">High</string>
-    <string name="quality_standard">Standard</string>
     <string name="quality_original_best">Original / best available</string>
     <string name="quality_live_original">Original motion file</string>
     <string name="quality_audio_best">Best available audio</string>
     <string name="quality_playlist_max">Highest playlist bitrate</string>
     <string name="quality_hd_best">HD / best available</string>
+    <string name="image_variant_original">Original</string>
+    <string name="image_dimensions_unknown">Unknown dimensions</string>
+    <string name="audio_bitrate_unknown">Unknown bitrate</string>
     <string name="media_image">Image</string>
     <string name="media_live_photo">Live Photo</string>
     <string name="media_video">Video</string>
@@ -94,10 +92,8 @@
     <string name="recorded">Downloaded</string>
     <string name="pending_download">Ready</string>
     <string name="select_at_least_one">Select at least one file.</string>
-    <string name="download_enqueued_format">Queued %1$d files; skipped %2$d previously downloaded files.</string>
-    <string name="all_selected_recorded">All selected files were already downloaded. No duplicate tasks were created.</string>
+    <string name="download_enqueued_format">Queued %1$d files.</string>
     <string name="download_started_format">Downloading %1$d files</string>
-    <string name="nothing_to_repeat">No files need to be downloaded again</string>
     <string name="create_download_failed">Could not create the download task</string>
     <string name="custom_download_failed">Could not download to the selected folder</string>
 

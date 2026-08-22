@@ -40,7 +40,6 @@
     <string name="login_done_waiting">登录后完成</string>
     <string name="login_done_ready">登录成功 · 完成</string>
     <string name="download_settings">下载设置</string>
-    <string name="default_quality">默认画质</string>
     <string name="live_cover_download">Live 图同时下载静态封面</string>
     <string name="live_cover_title">Live 图封面</string>
     <string name="live_cover_summary">随动态原文件一同保存静态封面</string>
@@ -70,15 +69,14 @@
     <string name="view_github">在 GitHub 查看项目</string>
     <string name="version_format">版本 %1$s</string>
 
-    <string name="quality_highest">最高可用（推荐）</string>
-    <string name="quality_best_short">最佳</string>
-    <string name="quality_high">高清</string>
-    <string name="quality_standard">标准</string>
     <string name="quality_original_best">原图 / 最高可用</string>
     <string name="quality_live_original">动态原文件</string>
     <string name="quality_audio_best">最高可用音频</string>
     <string name="quality_playlist_max">播放列表最高码率</string>
     <string name="quality_hd_best">高清 / 最高可用</string>
+    <string name="image_variant_original">原图</string>
+    <string name="image_dimensions_unknown">尺寸未知</string>
+    <string name="audio_bitrate_unknown">码率未知</string>
     <string name="media_image">图片</string>
     <string name="media_live_photo">Live 图</string>
     <string name="media_video">视频</string>
@@ -94,10 +92,8 @@
     <string name="recorded">已记录</string>
     <string name="pending_download">待下载</string>
     <string name="select_at_least_one">请至少选择一个文件。</string>
-    <string name="download_enqueued_format">已交给系统下载器：%1$d 个文件；跳过 %2$d 个已记录文件。</string>
-    <string name="all_selected_recorded">所选文件都已记录过，未重复创建下载任务。</string>
+    <string name="download_enqueued_format">已交给系统下载器：%1$d 个文件</string>
     <string name="download_started_format">已开始下载 %1$d 个文件</string>
-    <string name="nothing_to_repeat">没有需要重复下载的文件</string>
     <string name="create_download_failed">无法创建下载任务</string>
     <string name="custom_download_failed">下载到所选文件夹失败</string>
 

@@ -9,21 +9,7 @@ enum class MediaType(val labelRes: Int) {
     AUDIO(R.string.media_audio),
 }
 
-enum class QualityPreference(val key: String, val labelRes: Int) {
-    HIGHEST("highest", R.string.quality_highest),
-    HIGH("high", R.string.quality_high),
-    STANDARD("standard", R.string.quality_standard);
-
-    companion object {
-        fun fromStored(value: String): QualityPreference = entries.firstOrNull { it.key == value }
-            ?: when (value) {
-                "最高可用（推荐）", "Best available (recommended)" -> HIGHEST
-                "高清", "High" -> HIGH
-                "标准", "Standard" -> STANDARD
-                else -> HIGHEST
-            }
-    }
-}
+enum class QualityPreference { HIGHEST }
 
 object MediaQuality {
     const val ORIGINAL_BEST = "original_best"
@@ -31,17 +17,13 @@ object MediaQuality {
     const val AUDIO_BEST = "audio_best"
     const val PLAYLIST_MAX = "playlist_max"
     const val HD_BEST = "hd_best"
-    const val HIGH = "high"
-    const val STANDARD = "standard"
-
     fun labelRes(key: String): Int = when (key) {
         ORIGINAL_BEST -> R.string.quality_original_best
         LIVE_ORIGINAL -> R.string.quality_live_original
         AUDIO_BEST -> R.string.quality_audio_best
         PLAYLIST_MAX -> R.string.quality_playlist_max
         HD_BEST -> R.string.quality_hd_best
-        HIGH -> R.string.quality_high
-        else -> R.string.quality_standard
+        else -> R.string.quality_original_best
     }
 }
 
@@ -54,18 +36,24 @@ data class MediaItem(
     val thumbnailUrl: String = "",
     /** Optional still cover that belongs to a Live Photo, not a separate card. */
     val coverUrl: String = "",
+    /** Source variants returned for this image, including Weibo's /large/ original. */
+    val variants: List<MediaVariant> = emptyList(),
+    val selectedVariantKey: String? = null,
 ) {
+    val stableId: String get() = "${type.name}:$postId:$ordinal"
+
+    fun selectVariant(key: String): MediaItem {
+        val variant = variants.firstOrNull { it.key == key } ?: return this
+        return copy(url = variant.url, selectedVariantKey = variant.key)
+    }
+
     fun suggestedFileName(): String {
         val extension = runCatching {
             val path = URI(url).path ?: ""
             path.substringAfterLast('.', "")
         }.getOrDefault("").lowercase()
-        val safeExtension = when {
-            extension.matches(Regex("[a-z0-9]{2,5}")) -> extension
-            type == MediaType.IMAGE -> "jpg"
-            type == MediaType.AUDIO -> "mp3"
-            else -> "mp4"
-        }
+        val safeExtension = extension.takeIf { MediaFileTypes.acceptsExtension(type, it) }
+            ?: MediaFileTypes.defaultExtension(type)
         val prefix = when (type) {
             MediaType.IMAGE -> "image"
             MediaType.LIVE_PHOTO -> "live"
@@ -73,6 +61,96 @@ data class MediaItem(
             MediaType.AUDIO -> "audio"
         }
         return "${prefix}_${postId}_${ordinal.toString().padStart(2, '0')}.$safeExtension"
+    }
+}
+
+internal object MediaFileTypes {
+    private val imageExtensions = setOf("jpg", "jpeg", "png", "webp", "gif", "heic", "heif", "avif")
+    private val videoExtensions = setOf("mp4", "mov", "m4v", "webm", "mkv", "m3u8")
+    private val audioExtensions = setOf("mp3", "m4a", "aac", "wav", "flac", "ogg", "opus")
+
+    fun acceptsExtension(type: MediaType, extension: String): Boolean = when (type) {
+        MediaType.IMAGE -> extension in imageExtensions
+        MediaType.VIDEO, MediaType.LIVE_PHOTO -> extension in videoExtensions
+        MediaType.AUDIO -> extension in audioExtensions
+    }
+
+    fun isKnownImagePath(path: String): Boolean = extensionOf(path) in imageExtensions
+    fun isKnownVideoPath(path: String): Boolean = extensionOf(path) in videoExtensions
+    fun isKnownAudioPath(path: String): Boolean = extensionOf(path) in audioExtensions
+
+    fun defaultExtension(type: MediaType): String = when (type) {
+        MediaType.IMAGE -> "jpg"
+        MediaType.AUDIO -> "mp3"
+        MediaType.VIDEO, MediaType.LIVE_PHOTO -> "mp4"
+    }
+
+    private fun extensionOf(path: String): String = path.substringAfterLast('.', "").lowercase()
+}
+
+data class MediaVariant(
+    val key: String,
+    val url: String,
+    val width: Int = 0,
+    val height: Int = 0,
+    val bitrate: Long = 0L,
+) {
+    val pixelArea: Long get() = width.toLong() * height.toLong()
+}
+
+internal object MediaVariantSelector {
+    data class InferredVideoQuality(
+        val height: Int = 0,
+        val isOriginal: Boolean = false,
+        val tier: Int = 0,
+    )
+
+    fun rank(type: MediaType, variants: List<MediaVariant>): List<MediaVariant> {
+        if (variants.size < 2 || type == MediaType.IMAGE) return variants
+        val indexed = variants.withIndex()
+        val ranked = when (type) {
+            MediaType.VIDEO, MediaType.LIVE_PHOTO -> indexed.sortedWith(
+                compareByDescending<IndexedValue<MediaVariant>> { it.value.pixelArea }
+                    .thenByDescending { maxOf(it.value.width, it.value.height) }
+                    .thenByDescending { it.value.bitrate }
+                    .thenByDescending { inferVideoQuality(it.value.key, it.value.url).isOriginal }
+                    .thenByDescending { inferVideoQuality(it.value.key, it.value.url).height }
+                    .thenBy { it.index },
+            )
+            MediaType.AUDIO -> indexed.sortedWith(
+                compareByDescending<IndexedValue<MediaVariant>> { it.value.bitrate }
+                    .thenBy { it.index },
+            )
+            MediaType.IMAGE -> indexed.toList()
+        }
+        return ranked.map { it.value }
+    }
+
+    fun inferVideoQuality(vararg values: String): InferredVideoQuality {
+        val text = values.joinToString(" ").lowercase()
+        val isOriginal = listOf("original", "source", "origin", "原画", "原始").any { it in text }
+        val explicitHeight = Regex("(?:^|[^0-9])(4320|2160|1440|1080|720|480|360)(?:p|[^0-9]|$)")
+            .findAll(text).mapNotNull { it.groupValues[1].toIntOrNull() }.maxOrNull()
+            ?: when {
+                Regex("(?:^|[^a-z0-9])8k(?:[^a-z0-9]|$)").containsMatchIn(text) -> 4320
+                Regex("(?:^|[^a-z0-9])4k(?:[^a-z0-9]|$)").containsMatchIn(text) -> 2160
+                Regex("(?:^|[^a-z0-9])2k(?:[^a-z0-9]|$)").containsMatchIn(text) -> 1440
+                Regex("(?:^|[^a-z0-9])(?:fhd|full[_ -]?hd)(?:[^a-z0-9]|$)").containsMatchIn(text) || "超清" in text -> 1080
+                Regex("(?:^|[^a-z0-9])hd(?:[^a-z0-9]|$)").containsMatchIn(text) || "高清" in text -> 720
+                Regex("(?:^|[^a-z0-9])sd(?:[^a-z0-9]|$)").containsMatchIn(text) || "标清" in text -> 480
+                "流畅" in text || "smooth" in text -> 360
+                else -> 0
+            }
+        val tier = when {
+            isOriginal -> 6
+            explicitHeight >= 2160 -> 5
+            explicitHeight >= 1080 -> 4
+            explicitHeight >= 720 -> 3
+            explicitHeight >= 480 -> 2
+            explicitHeight > 0 -> 1
+            else -> 0
+        }
+        return InferredVideoQuality(explicitHeight, isOriginal, tier)
     }
 }
 

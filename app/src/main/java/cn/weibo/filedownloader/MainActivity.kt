@@ -1,7 +1,6 @@
 package cn.weibo.filedownloader
 
 import android.Manifest
-import android.app.Activity
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
@@ -16,6 +15,9 @@ import android.view.inputmethod.EditorInfo
 import android.widget.EditText
 import android.widget.TextView
 import android.widget.Toast
+import androidx.activity.ComponentActivity
+import androidx.compose.ui.platform.ComposeView
+import androidx.compose.ui.platform.ViewCompositionStrategy
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
@@ -31,7 +33,7 @@ import com.google.android.material.button.MaterialButton
 import com.google.android.material.progressindicator.LinearProgressIndicator
 import java.util.concurrent.Executors
 
-class MainActivity : Activity() {
+class MainActivity : ComponentActivity() {
     override fun attachBaseContext(newBase: Context) { super.attachBaseContext(ThemeController.wrap(newBase)) }
     private val executor = Executors.newSingleThreadExecutor()
     private lateinit var preferences: SharedPreferences
@@ -43,6 +45,7 @@ class MainActivity : Activity() {
     private lateinit var summaryText: TextView
     private lateinit var mediaHeader: View
     private lateinit var mediaCarousel: WeiboCarouselView
+    private lateinit var mediaQualitySegments: ComposeView
     private lateinit var progress: LinearProgressIndicator
     private lateinit var contentScroll: View
     private lateinit var emptyTopSpacer: View
@@ -113,6 +116,8 @@ class MainActivity : Activity() {
         summaryText = findViewById(R.id.summaryText)
         mediaHeader = findViewById(R.id.mediaHeader)
         mediaCarousel = findViewById(R.id.mediaCarousel)
+        mediaQualitySegments = findViewById(R.id.mediaQualitySegments)
+        mediaQualitySegments.setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed)
         contentScroll = findViewById(R.id.contentScroll)
         emptyTopSpacer = findViewById(R.id.emptyTopSpacer)
         bottomBar = findViewById(R.id.bottomBar)
@@ -163,7 +168,7 @@ class MainActivity : Activity() {
             updateSelectionUi()
         }
         mediaCarousel.onItemClick = { item ->
-            if (item.selectable && !item.downloaded) {
+            if (item.selectable) {
                 if (selectedUrls.contains(item.id)) selectedUrls -= item.id else selectedUrls += item.id
                 post?.let { showMedia(it, resetCarousel = false) }
             }
@@ -349,17 +354,17 @@ class MainActivity : Activity() {
         if (url.isBlank()) return toast(getString(R.string.link_required))
         adoptPlatformForUrl(url)
         refreshSession()
-        val quality = QualityPreference.fromStored(preferences.getString("quality", QualityPreference.HIGHEST.key).orEmpty())
         post = null
         selectedUrls.clear()
         mediaCarousel.submitItems(emptyList())
         mediaCarousel.visibility = View.GONE
+        mediaQualitySegments.visibility = View.GONE
         updateSelectionUi()
         busy(true, getString(if (platform == Platform.WEIBO) R.string.reading_post else R.string.reading_douyin))
         if (platform == Platform.DOUYIN) {
             douyinClient?.close()
             douyinClient = DouyinClient(this)
-            douyinClient?.loadPost(url, quality) { result ->
+            douyinClient?.loadPost(url, QualityPreference.HIGHEST) { result ->
                 runOnUiThread {
                     douyinClient?.close()
                     douyinClient = null
@@ -374,7 +379,7 @@ class MainActivity : Activity() {
         executor.execute {
             try {
                 val includeLiveCover = preferences.getBoolean("live_cover", false)
-                val loaded = WeiboClient(sessionCookie, this, includeLiveCover).loadPost(url, quality)
+                val loaded = WeiboClient(sessionCookie, this, includeLiveCover).loadPost(url)
                 runOnUiThread { handleLoadedPost(loaded) }
             } catch (error: WeiboLoginRequiredException) {
                 runOnUiThread {
@@ -403,6 +408,7 @@ class MainActivity : Activity() {
         selectedUrls.clear()
         mediaCarousel.submitItems(emptyList())
         mediaCarousel.visibility = View.GONE
+        mediaQualitySegments.visibility = View.GONE
         updateSelectionUi()
         busy(false, error.message ?: getString(if (platform == Platform.WEIBO) R.string.read_failed else R.string.douyin_read_failed))
     }
@@ -411,6 +417,7 @@ class MainActivity : Activity() {
         val history = DownloadHistory(this)
         val carouselItems = value.media.mapIndexed { index, item ->
             val recorded = history.contains(item)
+            val qualityLabel = mediaTechnicalLabel(item)
             /* card content is supplied by the reusable carousel
             row.findViewById<TextView>(R.id.mediaTitle).text = "${index + 1}. ${getString(item.type.labelRes)} · ${getString(MediaQuality.labelRes(item.quality))}"
             row.findViewById<TextView>(R.id.mediaSubtitle).text = item.suggestedFileName()
@@ -441,10 +448,10 @@ class MainActivity : Activity() {
             CarouselMediaItem(
                 id = item.url,
                 imageUrl = preview,
-                title = "${index + 1}. ${getString(item.type.labelRes)} · ${getString(MediaQuality.labelRes(item.quality))}",
+                title = "${index + 1}. ${getString(item.type.labelRes)} · $qualityLabel",
                 subtitle = item.suggestedFileName(),
-                selected = !recorded && selectedUrls.contains(item.url),
-                selectable = !recorded,
+                selected = selectedUrls.contains(item.url),
+                selectable = true,
                 downloaded = recorded,
             )
         }
@@ -454,7 +461,88 @@ class MainActivity : Activity() {
             mediaCarousel.updateItems(carouselItems)
         }
         mediaCarousel.visibility = if (carouselItems.isEmpty()) View.GONE else View.VISIBLE
+        configureMediaQualitySegments(value)
         updateSelectionUi()
+    }
+
+    private fun configureMediaQualitySegments(value: WeiboPost) {
+        data class BatchGroup(val type: MediaType, val keys: List<String>, val selectedKey: String)
+        val groups = MediaType.entries.mapNotNull { type ->
+            val items = value.media.filter { it.type == type && it.variants.isNotEmpty() }
+            val keys = items.firstOrNull()?.variants
+                ?.map { it.key }
+                ?.filter { key -> items.all { item -> item.variants.any { it.key == key } } }
+                .orEmpty()
+            if (keys.size < 2) return@mapNotNull null
+            val selectedKey = items.mapNotNull { it.selectedVariantKey }
+                .distinct()
+                .singleOrNull()
+                ?.takeIf { it in keys }
+                ?: keys.first()
+            BatchGroup(type, keys, selectedKey)
+        }
+        if (groups.isEmpty()) {
+            mediaQualitySegments.visibility = View.GONE
+            return
+        }
+        val uiGroups = groups.map { group ->
+            WeiChoiceGroup(
+                title = getString(group.type.labelRes),
+                labels = group.keys.map(::mediaVariantLabel),
+                selectedIndex = group.keys.indexOf(group.selectedKey).coerceAtLeast(0),
+            )
+        }
+        mediaQualitySegments.visibility = View.VISIBLE
+        mediaQualitySegments.setContent {
+            WeiChoiceGroups(uiGroups) { groupIndex, itemIndex ->
+                val group = groups.getOrNull(groupIndex) ?: return@WeiChoiceGroups
+                group.keys.getOrNull(itemIndex)?.let { key ->
+                    selectVariantForBatch(group.type, key)
+                }
+            }
+        }
+    }
+
+    private fun selectVariantForBatch(type: MediaType, key: String) {
+        val current = post ?: return
+        val selectedStableIds = current.media
+            .filter { it.url in selectedUrls }
+            .mapTo(HashSet()) { it.stableId }
+        val updated = current.copy(
+            media = current.media.map { item ->
+                if (item.type == type) item.selectVariant(key) else item
+            },
+        )
+        post = updated
+        selectedUrls.clear()
+        selectedUrls += updated.media.filter { it.stableId in selectedStableIds }.map { it.url }
+        showMedia(updated, resetCarousel = false)
+    }
+
+    private fun mediaVariantLabel(key: String?): String = when (key) {
+        "original" -> getString(R.string.image_variant_original)
+        null -> getString(R.string.image_variant_original)
+        else -> key
+    }
+
+    private fun mediaTechnicalLabel(item: MediaItem): String {
+        val variant = item.variants.firstOrNull { it.key == item.selectedVariantKey }
+        return when (item.type) {
+            MediaType.IMAGE, MediaType.VIDEO, MediaType.LIVE_PHOTO -> {
+                if (variant != null && variant.width > 0 && variant.height > 0) {
+                    "${variant.width}×${variant.height}"
+                } else {
+                    getString(R.string.image_dimensions_unknown)
+                }
+            }
+            MediaType.AUDIO -> {
+                if (variant != null && variant.bitrate > 0L) {
+                    "${(variant.bitrate / 1000L).coerceAtLeast(1L)} kbps"
+                } else {
+                    getString(R.string.audio_bitrate_unknown)
+                }
+            }
+        }
     }
 
     /*
@@ -472,16 +560,14 @@ class MainActivity : Activity() {
 
     private fun toggleSelectAll() {
         val current = post ?: return
-        val history = DownloadHistory(this)
-        val eligible = current.media.filterNot { history.contains(it) }.map { it.url }
+        val eligible = current.media.map { it.url }
         if (eligible.isNotEmpty() && selectedUrls.containsAll(eligible)) selectedUrls.removeAll(eligible.toSet()) else selectedUrls.addAll(eligible)
         showMedia(current, resetCarousel = false)
     }
 
     private fun updateSelectionUi() {
         val current = post
-        val history = if (current != null) DownloadHistory(this) else null
-        val eligible = current?.media?.filterNot { history?.contains(it) == true }?.map { it.url }.orEmpty()
+        val eligible = current?.media?.map { it.url }.orEmpty()
         selectedUrls.retainAll(eligible.toSet())
         val allSelected = eligible.isNotEmpty() && selectedUrls.containsAll(eligible)
         val hasMedia = current?.media?.isNotEmpty() == true
@@ -531,18 +617,15 @@ class MainActivity : Activity() {
             ).enqueueSelected(current, chosen, destinationTreeUri)
             selectedUrls.removeAll(chosen.map { it.url }.toSet())
             showMedia(current, resetCarousel = false)
-            summaryText.text = if (result.queued > 0) {
-                getString(R.string.download_enqueued_format, result.queued, result.alreadyRecorded)
-            } else {
-                getString(R.string.all_selected_recorded)
-            }
-            toast(if (result.queued > 0) getString(R.string.download_started_format, result.queued) else getString(R.string.nothing_to_repeat))
+            summaryText.text = getString(R.string.download_enqueued_format, result.queued)
+            toast(getString(R.string.download_started_format, result.queued))
         } catch (error: Exception) { toast(error.message ?: getString(R.string.create_download_failed)) }
     }
 
     private fun refreshSession() {
         sessionCookie = WeiboSession.cookieHeader()
     }
+
 
     private fun busy(active: Boolean, message: String) {
         progress.visibility = if (active) View.VISIBLE else View.GONE

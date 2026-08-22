@@ -233,11 +233,8 @@ class DouyinClient(private val activity: Activity) {
 
     private fun extractId(value: String): String = Regex("(?:/video/|/share/video/|/note/)(\\d+)").find(value)?.groupValues?.getOrNull(1).orEmpty()
 
-    private fun qualityKey(quality: QualityPreference): String = when (quality) {
-        QualityPreference.HIGHEST -> MediaQuality.HD_BEST
-        QualityPreference.HIGH -> MediaQuality.HIGH
-        QualityPreference.STANDARD -> MediaQuality.STANDARD
-    }
+    private fun qualityKey(@Suppress("UNUSED_PARAMETER") quality: QualityPreference): String =
+        MediaQuality.HD_BEST
 
     class DouyinException(message: String) : RuntimeException(message)
 

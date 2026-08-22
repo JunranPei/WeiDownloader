@@ -35,8 +35,6 @@ class SettingsActivity : ComponentActivity() {
     private val isDouyin get() = platformKey == Platform.DOUYIN.key
     private lateinit var loginStatus: TextView
     private lateinit var loginButton: MaterialButton
-    private lateinit var qualityInput: TextView
-    private lateinit var qualitySegments: ComposeView
     private lateinit var themeSegments: ComposeView
     private lateinit var organizationSegments: ComposeView
     private lateinit var themeSummary: TextView
@@ -53,7 +51,6 @@ class SettingsActivity : ComponentActivity() {
         bindViews()
         configurePlatform()
         configureInsets()
-        configureQuality()
         configureLiveCover()
         configureOrganization()
         configureTheme()
@@ -82,8 +79,6 @@ class SettingsActivity : ComponentActivity() {
     private fun bindViews() {
         loginStatus = findViewById(R.id.settingsLoginStatus)
         loginButton = findViewById(R.id.settingsLoginButton)
-        qualityInput = findViewById(R.id.settingsQualityInput)
-        qualitySegments = findViewById(R.id.settingsQualitySegments)
         themeSegments = findViewById(R.id.settingsThemeSegments)
         organizationSegments = findViewById(R.id.settingsOrganizationSegments)
         themeSummary = findViewById(R.id.settingsThemeSummary)
@@ -115,29 +110,6 @@ class SettingsActivity : ComponentActivity() {
             loginButton.visibility = View.GONE
         }
     }
-
-    private fun configureQuality() {
-        val selected = QualityPreference.fromStored(preferences.getString("quality", QualityPreference.HIGHEST.key).orEmpty())
-        qualityInput.text = getString(selected.labelRes)
-        qualitySegments.setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed)
-        qualitySegments.setContent {
-            var selectedIndex by rememberSaveable { mutableIntStateOf(selected.ordinal) }
-            WeiSingleChoiceSegmentedControl(
-                labels = listOf(
-                    getString(R.string.quality_best_short),
-                    getString(R.string.quality_high),
-                    getString(R.string.quality_standard),
-                ),
-                selectedIndex = selectedIndex,
-            ) { index ->
-                selectedIndex = index
-                val value = QualityPreference.entries[index]
-                preferences.edit().putString("quality", value.key).apply()
-                qualityInput.text = getString(value.labelRes)
-            }
-        }
-    }
-
     private fun configureLiveCover() {
         liveCoverSwitch.isChecked = preferences.getBoolean("live_cover", false)
         liveCoverSwitch.setOnCheckedChangeListener { _, checked ->

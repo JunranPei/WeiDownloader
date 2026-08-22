@@ -10,11 +10,15 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
@@ -27,7 +31,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color.Companion.Transparent
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
@@ -37,61 +40,101 @@ import androidx.core.content.ContextCompat
 import com.google.android.material.R as MaterialR
 
 @Composable
+@OptIn(ExperimentalLayoutApi::class)
 fun WeiSingleChoiceSegmentedControl(
     labels: List<String>,
     selectedIndex: Int,
+    maxItemsPerRow: Int = 3,
     onSelected: (Int) -> Unit,
 ) {
     MaterialTheme(colorScheme = currentViewColorScheme()) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(CircleShape)
-                .background(Transparent, CircleShape),
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
+        BoxWithConstraints(
+            modifier = Modifier.fillMaxWidth(),
         ) {
-            labels.forEachIndexed { index, label ->
-                val selected = selectedIndex == index
-                val shape = if (selected) CircleShape else RoundedCornerShape(10.dp)
-                val containerColor by animateColorAsState(
-                    if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceContainerHigh,
-                    label = "ButtonColor",
-                )
-                val contentColor by animateColorAsState(
-                    if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface,
-                    label = "ContentColor",
-                )
+            val columns = labels.size.coerceAtLeast(1).coerceAtMost(maxItemsPerRow.coerceAtLeast(1))
+            val gap = 4.dp
+            // Leave one dp for pixel rounding so the last item never wraps by a single pixel.
+            val roundingAllowance = if (columns > 1) 1.dp else 0.dp
+            val itemWidth = (maxWidth - gap * (columns - 1) - roundingAllowance) / columns
+            FlowRow(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(gap),
+                verticalArrangement = Arrangement.spacedBy(gap),
+                maxItemsInEachRow = columns,
+            ) {
+                labels.forEachIndexed { index, label ->
+                    val selected = selectedIndex == index
+                    val shape = if (selected) CircleShape else RoundedCornerShape(10.dp)
+                    val containerColor by animateColorAsState(
+                        if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceContainerHigh,
+                        label = "ButtonColor",
+                    )
+                    val contentColor by animateColorAsState(
+                        if (selected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface,
+                        label = "ContentColor",
+                    )
 
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(48.dp)
-                        .clip(shape)
-                        .background(containerColor)
-                        .clickable { onSelected(index) },
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.Center,
+                    Box(
+                        modifier = Modifier
+                            .width(itemWidth)
+                            .height(48.dp)
+                            .clip(shape)
+                            .background(containerColor)
+                            .clickable { onSelected(index) },
+                        contentAlignment = Alignment.Center,
                     ) {
-                        AnimatedVisibility(visible = selected) {
-                            Icon(
-                                painter = painterResource(R.drawable.ic_done),
-                                contentDescription = null,
-                                modifier = Modifier.padding(end = 8.dp).size(18.dp),
-                                tint = contentColor,
+                        androidx.compose.foundation.layout.Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.Center,
+                        ) {
+                            AnimatedVisibility(visible = selected) {
+                                Icon(
+                                    painter = painterResource(R.drawable.ic_done),
+                                    contentDescription = null,
+                                    modifier = Modifier.padding(end = 8.dp).size(18.dp),
+                                    tint = contentColor,
+                                )
+                            }
+                            Text(
+                                text = label,
+                                style = MaterialTheme.typography.labelLarge,
+                                color = contentColor,
+                                fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                                maxLines = 1,
                             )
                         }
-                        Text(
-                            text = label,
-                            style = MaterialTheme.typography.labelLarge,
-                            color = contentColor,
-                            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
-                            maxLines = 1,
-                        )
                     }
                 }
+            }
+        }
+    }
+}
+
+data class WeiChoiceGroup(
+    val title: String,
+    val labels: List<String>,
+    val selectedIndex: Int,
+)
+
+@Composable
+fun WeiChoiceGroups(
+    groups: List<WeiChoiceGroup>,
+    onSelected: (groupIndex: Int, itemIndex: Int) -> Unit,
+) {
+    MaterialTheme(colorScheme = currentViewColorScheme()) {
+        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            groups.forEachIndexed { groupIndex, group ->
+                if (groups.size > 1) {
+                    Text(
+                        text = group.title,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                WeiSingleChoiceSegmentedControl(
+                    labels = group.labels,
+                    selectedIndex = group.selectedIndex,
+                ) { itemIndex -> onSelected(groupIndex, itemIndex) }
             }
         }
     }

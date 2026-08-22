@@ -1,6 +1,8 @@
 package cn.weibo.filedownloader
 
 import android.content.Context
+import android.graphics.BitmapFactory
+import android.media.MediaMetadataRetriever
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.BufferedInputStream
@@ -17,6 +19,7 @@ class WeiboClient(
 ) {
     companion object {
         private const val AGENT = "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/126 Mobile Safari/537.36"
+        private const val IMAGE_VARIANT_ORIGINAL = "original"
     }
 
     fun loadPost(sharedUrl: String, quality: QualityPreference = QualityPreference.HIGHEST): WeiboPost {
@@ -44,7 +47,7 @@ class WeiboClient(
         val postId = data.optString("id", id)
         val defaultAuthor = context.getString(R.string.default_author)
         val author = data.optJSONObject("user")?.optString("screen_name", defaultAuthor) ?: defaultAuthor
-        val media = parseMedia(data, quality, postId)
+        val media = hydrateMediaMetadata(parseMedia(data, quality, postId))
         if (media.isEmpty()) throw WeiboException(context.getString(R.string.no_media))
         return WeiboPost(postId, cleanText(data.optString("text_raw", data.optString("text"))), author, sourceUrl, media)
     }
@@ -54,14 +57,16 @@ class WeiboClient(
         val playInfo = payload.optJSONObject("data")?.optJSONObject("Component_Play_Playinfo")
             ?: payload.optJSONObject("Component_Play_Playinfo")
             ?: throw WeiboException(payload.optString("msg", context.getString(R.string.no_media)))
-        val videoUrl = bestComponentVideo(playInfo, quality)
+        val variants = componentVideoVariants(playInfo)
+        val selectedVariant = chooseMediaVariant(variants, quality)
+        val videoUrl = selectedVariant?.url ?: bestComponentVideo(playInfo, quality)
             ?: throw WeiboException(context.getString(R.string.no_media))
         val safeId = objectId.substringAfter(':').ifBlank { objectId.replace(':', '_') }
         val defaultAuthor = context.getString(R.string.default_author)
         val author = firstText(playInfo, "nickname", "author", "author_name", "screen_name").ifBlank { defaultAuthor }
         val text = cleanText(firstText(playInfo, "title", "text", "content1", "content"))
         val thumbnail = thumbnailFrom(playInfo)
-        val media = listOf(
+        val media = hydrateMediaMetadata(listOf(
             MediaItem(
                 type = MediaType.VIDEO,
                 url = videoUrl,
@@ -69,8 +74,10 @@ class WeiboClient(
                 postId = safeId,
                 ordinal = 1,
                 thumbnailUrl = thumbnail,
+                variants = variants,
+                selectedVariantKey = selectedVariant?.key,
             ),
-        )
+        ))
         return WeiboPost(safeId, text, author, sourceUrl, media)
     }
 
@@ -129,9 +136,7 @@ class WeiboClient(
             if (picture.optString("type").equals("video", true)) {
                 val mediaInfo = picture.optJSONObject("media_info")
                 if (mediaInfo != null) parseMediaInfo(mediaInfo, picture, quality, postId, result, seen)
-                else bestDirectVideo(picture, quality)?.let {
-                    add(result, seen, MediaType.VIDEO, it, videoQualityLabel(quality, false), postId, result.size + 1, thumbnailFrom(picture))
-                }
+                else addDirectMedia(picture, MediaType.VIDEO, quality, postId, result, seen, thumbnailFrom(picture))
             } else {
                 parsePicture(picture, quality, postId, result, seen)
             }
@@ -154,9 +159,7 @@ class WeiboClient(
             if (type == "video" || objectType == "video") {
                 val mediaInfo = data.optJSONObject("media_info") ?: item.optJSONObject("media_info")
                 if (mediaInfo != null) parseMediaInfo(mediaInfo, data, quality, postId, result, seen)
-                else bestDirectVideo(data, quality)?.let {
-                    add(result, seen, MediaType.VIDEO, it, videoQualityLabel(quality, false), postId, result.size + 1, thumbnailFrom(data))
-                }
+                else addDirectMedia(data, MediaType.VIDEO, quality, postId, result, seen, thumbnailFrom(data))
             } else {
                 parsePicture(data.optJSONObject("pic_info") ?: data, quality, postId, result, seen)
             }
@@ -172,12 +175,32 @@ class WeiboClient(
     ) {
         val thumbnail = chooseThumbnail(picture).ifBlank { thumbnailFrom(picture) }
         val liveUrl = chooseLiveVideo(picture)
+        val imageVariants = collectImageVariants(picture)
+        val selectedVariant = chooseImageVariant(imageVariants, quality)
         if (liveUrl != null) {
-            val cover = if (includeLiveCover) chooseImage(picture, quality).orEmpty() else ""
-            add(result, seen, MediaType.LIVE_PHOTO, liveUrl, MediaQuality.LIVE_ORIGINAL, postId, result.size + 1, thumbnail, cover)
+            val cover = if (includeLiveCover) selectedVariant?.url.orEmpty() else ""
+            val liveVariants = collectDirectMediaVariants(picture, MediaType.LIVE_PHOTO).ifEmpty {
+                listOf(MediaVariant("live", liveUrl))
+            }
+            val selectedLiveVariant = chooseMediaVariant(liveVariants, quality) ?: liveVariants.first()
+            add(
+                result, seen, MediaType.LIVE_PHOTO, selectedLiveVariant.url, MediaQuality.LIVE_ORIGINAL,
+                postId, result.size + 1, thumbnail, cover, liveVariants, selectedLiveVariant.key,
+            )
         } else {
-            chooseImage(picture, quality)?.let {
-                add(result, seen, MediaType.IMAGE, it, imageQualityLabel(quality), postId, result.size + 1, thumbnail.ifBlank { it })
+            selectedVariant?.let {
+                add(
+                    result = result,
+                    seen = seen,
+                    type = MediaType.IMAGE,
+                    url = it.url,
+                    quality = imageQualityLabel(quality),
+                    id = postId,
+                    order = result.size + 1,
+                    thumbnailUrl = thumbnail.ifBlank { it.url },
+                    variants = imageVariants,
+                    selectedVariantKey = it.key,
+                )
             }
         }
     }
@@ -205,16 +228,29 @@ class WeiboClient(
         val thumbnail = thumbnailFrom(container).ifBlank { thumbnailFrom(mediaInfo) }
         val type = container.optString("type").lowercase()
         val objectType = container.optString("object_type").lowercase()
-        val audioUrl = firstUrl(mediaInfo, listOf("audio_url_hd", "audio_url", "mp3_url", "stream_url"))
+        val audioVariants = collectDirectMediaVariants(mediaInfo, MediaType.AUDIO)
+        val audioUrl = chooseMediaVariant(audioVariants, quality)?.url
+            ?: firstUrl(mediaInfo, listOf("audio_url_hd", "audio_url", "mp3_url", "stream_url"))
         val isAudio = type == "audio" || objectType == "audio" || hasAny(mediaInfo, listOf("audio_url", "mp3_url", "audio_url_hd"))
         if (isAudio && audioUrl != null) {
-            add(result, seen, MediaType.AUDIO, audioUrl, MediaQuality.AUDIO_BEST, postId, result.size + 1, thumbnail)
+            val selected = audioVariants.firstOrNull { it.url == audioUrl }
+            add(
+                result, seen, MediaType.AUDIO, audioUrl, MediaQuality.AUDIO_BEST,
+                postId, result.size + 1, thumbnail, variants = audioVariants,
+                selectedVariantKey = selected?.key,
+            )
             return
         }
-        val playlistVideo = bestPlaybackUrl(mediaInfo.optJSONArray("playback_list"), quality)
-        val directVideo = bestDirectVideo(mediaInfo, quality)
-        (playlistVideo ?: directVideo)?.let {
-            add(result, seen, MediaType.VIDEO, it, videoQualityLabel(quality, playlistVideo != null), postId, result.size + 1, thumbnail)
+        val playlistVariants = playbackVariants(mediaInfo.optJSONArray("playback_list"))
+        val videoVariants = playlistVariants.ifEmpty { collectDirectMediaVariants(mediaInfo, MediaType.VIDEO) }
+        val selectedVideo = chooseMediaVariant(videoVariants, quality)
+        val directVideo = selectedVideo?.url ?: bestDirectVideo(mediaInfo, quality)
+        directVideo?.let {
+            add(
+                result, seen, MediaType.VIDEO, it,
+                videoQualityLabel(quality, playlistVariants.isNotEmpty()), postId, result.size + 1,
+                thumbnail, variants = videoVariants, selectedVariantKey = selectedVideo?.key,
+            )
         }
     }
 
@@ -237,8 +273,59 @@ class WeiboClient(
             status.optJSONObject("page_info")?.optJSONObject("media_info") != null ||
             status.optJSONObject("media_info") != null
 
-    private fun add(result: MutableList<MediaItem>, seen: MutableSet<String>, type: MediaType, url: String, quality: String, id: String, order: Int, thumbnailUrl: String = "", coverUrl: String = "") {
-        if (url.isNotBlank() && seen.add(url)) result += MediaItem(type, url, quality, id, order, thumbnailUrl, coverUrl)
+    private fun add(
+        result: MutableList<MediaItem>,
+        seen: MutableSet<String>,
+        type: MediaType,
+        url: String,
+        quality: String,
+        id: String,
+        order: Int,
+        thumbnailUrl: String = "",
+        coverUrl: String = "",
+        variants: List<MediaVariant> = emptyList(),
+        selectedVariantKey: String? = null,
+    ) {
+        if (url.isNotBlank() && seen.add(url)) {
+            result += MediaItem(
+                type = type,
+                url = url,
+                quality = quality,
+                postId = id,
+                ordinal = order,
+                thumbnailUrl = thumbnailUrl,
+                coverUrl = coverUrl,
+                variants = variants,
+                selectedVariantKey = selectedVariantKey,
+            )
+        }
+    }
+
+    private fun addDirectMedia(
+        data: JSONObject,
+        type: MediaType,
+        quality: QualityPreference,
+        postId: String,
+        result: MutableList<MediaItem>,
+        seen: MutableSet<String>,
+        thumbnail: String,
+    ) {
+        val variants = collectDirectMediaVariants(data, type)
+        val selected = chooseMediaVariant(variants, quality)
+        val fallback = if (type == MediaType.VIDEO) bestDirectVideo(data, quality) else null
+        val url = selected?.url ?: fallback ?: return
+        add(
+            result = result,
+            seen = seen,
+            type = type,
+            url = url,
+            quality = videoQualityLabel(quality, false),
+            id = postId,
+            order = result.size + 1,
+            thumbnailUrl = thumbnail,
+            variants = variants,
+            selectedVariantKey = selected?.key,
+        )
     }
 
     private fun getJson(address: String): JSONObject = requestJson(address)
@@ -359,14 +446,311 @@ class WeiboClient(
     }
 
     private fun chooseImage(picture: JSONObject, quality: QualityPreference): String? {
-        val keys = when (quality) {
-            QualityPreference.HIGHEST -> listOf("largest", "original", "mw2000", "large", "pic_big", "bmiddle", "pic_middle", "thumbnail", "pic_small")
-            QualityPreference.HIGH -> listOf("large", "mw2000", "pic_big", "bmiddle", "pic_middle", "thumbnail", "pic_small")
-            QualityPreference.STANDARD -> listOf("bmiddle", "pic_middle", "thumbnail", "pic_small", "large", "pic_big")
-        }
-        for (key in keys) urlValue(picture.opt(key))?.let { return it }
-        return urlValue(picture.opt("url"))
+        return chooseImageVariant(collectImageVariants(picture), quality)?.url
     }
+
+    private data class RawImageVariant(
+        val key: String,
+        val url: String,
+        val width: Int,
+        val height: Int,
+        val rank: Int,
+    ) {
+        val area: Long get() = width.toLong() * height.toLong()
+    }
+
+    private fun collectImageVariants(picture: JSONObject): List<MediaVariant> {
+        val raw = ArrayList<RawImageVariant>()
+        collectRawImageVariants(picture, depth = 0, raw)
+        if (raw.isEmpty()) return emptyList()
+
+        val best = raw.sortedWith(
+            compareByDescending<RawImageVariant> { it.area }.thenBy { it.rank },
+        ).first()
+        val originalUrl = normalizeOriginalImageUrl(best.url)
+        val result = ArrayList<MediaVariant>()
+        // The /large/ file may be larger than the API's preview metadata, so
+        // its dimensions are measured from the actual file below.
+        result += MediaVariant(IMAGE_VARIANT_ORIGINAL, originalUrl)
+
+        val seenUrls = hashSetOf(originalUrl)
+        val seenKeys = hashSetOf(IMAGE_VARIANT_ORIGINAL)
+        raw.sortedWith(compareByDescending<RawImageVariant> { it.area }.thenBy { it.rank }).forEach { variant ->
+            if (seenUrls.add(variant.url) && seenKeys.add(variant.key)) {
+                result += MediaVariant(variant.key, variant.url, variant.width, variant.height)
+            }
+        }
+        return result
+    }
+
+    private fun collectRawImageVariants(
+        data: JSONObject,
+        depth: Int,
+        result: MutableList<RawImageVariant>,
+    ) {
+        if (depth > 2) return
+        data.keys().asSequence().toList().forEach { field ->
+            val value = data.opt(field)
+            val info = value as? JSONObject
+            val url = urlValue(value)
+            if (url != null && isImageVariantUrl(url)) {
+                val geo = info?.optJSONObject("geo")
+                val width = info?.optLong("width", 0L)?.takeIf { it > 0L }
+                    ?: geo?.optLong("width", 0L)
+                    ?: 0L
+                val height = info?.optLong("height", 0L)?.takeIf { it > 0L }
+                    ?: geo?.optLong("height", 0L)
+                    ?: 0L
+                result += RawImageVariant(
+                    key = imageVariantKey(field, url),
+                    url = url,
+                    width = width.coerceAtMost(Int.MAX_VALUE.toLong()).toInt(),
+                    height = height.coerceAtMost(Int.MAX_VALUE.toLong()).toInt(),
+                    rank = result.size,
+                )
+            }
+            when (value) {
+                is JSONObject -> collectRawImageVariants(value, depth + 1, result)
+                is JSONArray -> for (index in 0 until value.length()) {
+                    value.optJSONObject(index)?.let { collectRawImageVariants(it, depth + 1, result) }
+                }
+            }
+        }
+    }
+
+    private fun chooseImageVariant(variants: List<MediaVariant>, quality: QualityPreference): MediaVariant? {
+        if (variants.isEmpty()) return null
+        return variants.first()
+    }
+
+    private fun hydrateMediaMetadata(media: List<MediaItem>): List<MediaItem> {
+        val measuredImages = HashMap<String, Pair<Int, Int>?>()
+        val measuredMedia = HashMap<String, MediaProbe?>()
+        return media.map { item ->
+            if (item.variants.isEmpty()) return@map item
+            val variants = item.variants.map { variant ->
+                if (item.type == MediaType.IMAGE) {
+                    if (variant.width > 0 && variant.height > 0) return@map variant
+                    val dimensions = if (measuredImages.containsKey(variant.url)) {
+                        measuredImages[variant.url]
+                    } else {
+                        probeImageDimensions(variant.url).also { measuredImages[variant.url] = it }
+                    }
+                    return@map dimensions?.let { (width, height) ->
+                        variant.copy(width = width, height = height)
+                    } ?: variant
+                }
+                val needsProbe = when (item.type) {
+                    MediaType.VIDEO, MediaType.LIVE_PHOTO -> variant.width <= 0 || variant.height <= 0
+                    MediaType.AUDIO -> variant.bitrate <= 0L
+                    MediaType.IMAGE -> false
+                }
+                if (!needsProbe) return@map variant
+                val probe = if (measuredMedia.containsKey(variant.url)) {
+                    measuredMedia[variant.url]
+                } else {
+                    probeMedia(variant.url).also { measuredMedia[variant.url] = it }
+                }
+                probe?.let {
+                    variant.copy(
+                        width = variant.width.takeIf { value -> value > 0 } ?: it.width,
+                        height = variant.height.takeIf { value -> value > 0 } ?: it.height,
+                        bitrate = variant.bitrate.takeIf { value -> value > 0L } ?: it.bitrate,
+                    )
+                } ?: variant
+            }
+            val rankedVariants = MediaVariantSelector.rank(item.type, variants)
+            val selected = rankedVariants.firstOrNull()
+            item.copy(
+                url = selected?.url ?: item.url,
+                variants = rankedVariants,
+                selectedVariantKey = selected?.key ?: item.selectedVariantKey,
+            )
+        }
+    }
+
+    private fun probeImageDimensions(url: String): Pair<Int, Int>? {
+        val connection = (URL(url).openConnection() as HttpURLConnection).apply {
+            requestMethod = "GET"
+            connectTimeout = 8_000
+            readTimeout = 8_000
+            setRequestProperty("User-Agent", AGENT)
+            setRequestProperty("Referer", "https://weibo.com/")
+            setRequestProperty("Cookie", cookie)
+            setRequestProperty("Range", "bytes=0-262143")
+        }
+        return try {
+            if (connection.responseCode !in 200..299) return null
+            val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+            BufferedInputStream(connection.inputStream).use { BitmapFactory.decodeStream(it, null, options) }
+            if (options.outWidth > 0 && options.outHeight > 0) options.outWidth to options.outHeight else null
+        } catch (_: Exception) {
+            null
+        } finally {
+            connection.disconnect()
+        }
+    }
+
+    private data class MediaProbe(val width: Int, val height: Int, val bitrate: Long)
+
+    private fun probeMedia(url: String): MediaProbe? {
+        val retriever = MediaMetadataRetriever()
+        return try {
+            retriever.setDataSource(
+                url,
+                mapOf("User-Agent" to AGENT, "Referer" to "https://weibo.com/", "Cookie" to cookie),
+            )
+            MediaProbe(
+                width = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toIntOrNull() ?: 0,
+                height = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toIntOrNull() ?: 0,
+                bitrate = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_BITRATE)?.toLongOrNull() ?: 0L,
+            )
+        } catch (_: Exception) {
+            null
+        } finally {
+            runCatching { retriever.release() }
+        }
+    }
+
+    private data class RawMediaVariant(
+        val field: String,
+        val label: String,
+        val url: String,
+        val width: Int,
+        val height: Int,
+        val bitrate: Long,
+        val inferredHeight: Int,
+        val isOriginal: Boolean,
+        val tier: Int,
+        val rank: Int,
+    )
+
+    private fun collectDirectMediaVariants(data: JSONObject, type: MediaType): List<MediaVariant> {
+        val raw = ArrayList<RawMediaVariant>()
+        collectRawMediaVariants(data, type, depth = 0, raw)
+        val seenUrls = HashSet<String>()
+        val seenKeys = HashSet<String>()
+        return raw.sortedWith(
+            compareByDescending<RawMediaVariant> { it.isOriginal }
+                .thenByDescending { maxOf(it.height, it.inferredHeight) }
+                .thenByDescending { it.width.toLong() * it.height }
+                .thenByDescending { it.bitrate }
+                .thenByDescending { it.tier }
+                .thenBy { it.rank },
+        ).mapNotNull { variant ->
+            val key = mediaVariantKey(variant)
+            if (!seenUrls.add(variant.url) || !seenKeys.add(key)) return@mapNotNull null
+            MediaVariant(key, variant.url, variant.width, variant.height, variant.bitrate)
+        }
+    }
+
+    private fun collectRawMediaVariants(
+        data: JSONObject,
+        type: MediaType,
+        depth: Int,
+        result: MutableList<RawMediaVariant>,
+    ) {
+        if (depth > 3) return
+        data.keys().asSequence().toList().forEach { field ->
+            val value = data.opt(field)
+            val info = value as? JSONObject
+            val url = urlValue(value)
+            if (url != null && isMediaVariantUrl(field, url, type)) {
+                val meta = info?.optJSONObject("meta")
+                val width = positiveInt(info, meta, "width")
+                val height = positiveInt(info, meta, "height")
+                val bitrate = positiveLong(info, meta, "bitrate")
+                val label = firstTextOrEmpty(info, "quality_desc", "quality_label", "quality_name", "label", "name")
+                val quality = MediaVariantSelector.inferVideoQuality(field, label, url)
+                result += RawMediaVariant(
+                    field = field,
+                    label = label,
+                    url = url,
+                    width = width,
+                    height = height,
+                    bitrate = bitrate,
+                    inferredHeight = quality.height,
+                    isOriginal = quality.isOriginal,
+                    tier = quality.tier,
+                    rank = result.size,
+                )
+            }
+            when (value) {
+                is JSONObject -> collectRawMediaVariants(value, type, depth + 1, result)
+                is JSONArray -> for (index in 0 until value.length()) {
+                    value.optJSONObject(index)?.let { collectRawMediaVariants(it, type, depth + 1, result) }
+                }
+            }
+        }
+    }
+
+    private fun mediaVariantKey(variant: RawMediaVariant): String = when {
+        variant.label.isNotBlank() -> variant.label
+        variant.height > 0 -> "${variant.height}p"
+        variant.bitrate > 0L -> "${(variant.bitrate / 1000L).coerceAtLeast(1L)} kbps"
+        else -> variant.field.lowercase()
+            .removeSuffix("_url")
+            .removeSuffix("_mp4")
+            .replace('_', ' ')
+    }
+
+    private fun positiveInt(primary: JSONObject?, secondary: JSONObject?, key: String): Int =
+        (primary?.optLong(key, 0L)?.takeIf { it > 0L }
+            ?: secondary?.optLong(key, 0L)?.takeIf { it > 0L }
+            ?: 0L).coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+
+    private fun positiveLong(primary: JSONObject?, secondary: JSONObject?, key: String): Long =
+        primary?.optLong(key, 0L)?.takeIf { it > 0L }
+            ?: secondary?.optLong(key, 0L)?.takeIf { it > 0L }
+            ?: 0L
+
+    private fun firstTextOrEmpty(data: JSONObject?, vararg keys: String): String = data?.let { value ->
+        keys.asSequence().map { value.optString(it).trim() }.firstOrNull { it.isNotBlank() }
+    }.orEmpty()
+
+    private fun isMediaVariantUrl(field: String, url: String, type: MediaType): Boolean {
+        val normalizedField = field.lowercase()
+        val path = runCatching { URL(url).path.lowercase() }.getOrDefault("")
+        return when (type) {
+            MediaType.AUDIO -> !MediaFileTypes.isKnownImagePath(path) &&
+                !MediaFileTypes.isKnownVideoPath(path) &&
+                (MediaFileTypes.isKnownAudioPath(path) || "audio" in normalizedField || "mp3" in normalizedField)
+            MediaType.VIDEO, MediaType.LIVE_PHOTO -> !MediaFileTypes.isKnownImagePath(path) &&
+                !MediaFileTypes.isKnownAudioPath(path) &&
+                (MediaFileTypes.isKnownVideoPath(path) || "video" in normalizedField || "mp4" in normalizedField ||
+                    "play" in normalizedField || "stream" in normalizedField || "live" in normalizedField)
+            MediaType.IMAGE -> false
+        }
+    }
+
+    private fun chooseMediaVariant(variants: List<MediaVariant>, quality: QualityPreference): MediaVariant? {
+        if (variants.isEmpty()) return null
+        return variants.first()
+    }
+
+    private fun imageVariantKey(field: String, url: String): String {
+        val pathSpec = Regex("sinaimg\\.cn/([^/?]+)/", RegexOption.IGNORE_CASE)
+            .find(url)?.groupValues?.getOrNull(1)?.lowercase()
+        return pathSpec?.takeIf { it.matches(Regex("[a-z][a-z0-9_-]{0,23}")) }
+            ?: field.lowercase()
+    }
+
+    private fun isImageVariantUrl(url: String): Boolean {
+        val path = runCatching { URL(url).path.lowercase() }.getOrDefault("")
+        if (path.endsWith(".mp4") || path.endsWith(".mov") || path.endsWith(".m3u8")) return false
+        return url.contains("sinaimg.cn/", ignoreCase = true) ||
+            path.endsWith(".jpg") || path.endsWith(".jpeg") || path.endsWith(".png") ||
+            path.endsWith(".webp") || path.endsWith(".gif") || path.endsWith(".heic")
+    }
+
+    /** Weibo's viewer upgrades thumbnail/mw/orj URLs to the /large/ original. */
+    private fun normalizeOriginalImageUrl(url: String): String =
+        if (url.contains("sinaimg.cn", ignoreCase = true)) {
+            url.replace(
+                Regex("/(thumbnail|thumb150|mw\\d+|orj\\d+|small|bmiddle|wap\\d+|square|woriginal|original)/", RegexOption.IGNORE_CASE),
+                "/large/",
+            )
+        } else url
 
     private fun chooseThumbnail(picture: JSONObject): String = listOf("bmiddle", "pic_middle", "large", "pic_big", "thumbnail", "pic_small")
         .asSequence().mapNotNull { urlValue(picture.opt(it)) }.firstOrNull().orEmpty()
@@ -374,8 +758,12 @@ class WeiboClient(
     private fun chooseLiveVideo(picture: JSONObject): String? {
         for (key in listOf("live_photo", "live_photo_url", "live_video", "video_url", "videoSrc", "video")) {
             when (val value = picture.opt(key)) {
-                is String -> normalizeUrl(value)?.let { return it }
-                is JSONObject -> firstUrl(value, listOf("stream_url_hd", "url", "video_url"))?.let { return it }
+                is String -> normalizeUrl(value)
+                    ?.takeIf { isMediaVariantUrl(key, it, MediaType.LIVE_PHOTO) }
+                    ?.let { return it }
+                is JSONObject -> firstUrl(value, listOf("stream_url_hd", "url", "video_url"))
+                    ?.takeIf { isMediaVariantUrl(key, it, MediaType.LIVE_PHOTO) }
+                    ?.let { return it }
             }
         }
         if (picture.optString("type").equals("livephoto", true)) {
@@ -413,41 +801,36 @@ class WeiboClient(
 
     private data class ComponentVideoVariant(val order: Int, val label: String, val url: String, val score: Int)
 
-    private fun bestComponentVideo(playInfo: JSONObject, quality: QualityPreference): String? {
+    private fun componentVideoVariants(playInfo: JSONObject): List<MediaVariant> {
         val urls = playInfo.optJSONObject("urls")
         if (urls != null) {
             val raw = ArrayList<ComponentVideoVariant>()
-            var order = 0
             urls.keys().forEach { label ->
-                urlValue(urls.opt(label))?.let { url ->
-                    raw += ComponentVideoVariant(order, label, url, componentQualityScore(label))
-                    order++
+                urlValue(urls.opt(label))
+                    ?.takeIf { isMediaVariantUrl(label, it, MediaType.VIDEO) }
+                    ?.let { url ->
+                    raw += ComponentVideoVariant(raw.size, label, url, componentQualityScore(label))
                 }
             }
             if (raw.isNotEmpty()) {
-                // Weibo places the best stream first; quality labels provide a stronger ordering when present.
-                val hasExplicitQuality = raw.any { it.score > 0 }
-                val variants = raw.map { variant ->
-                    if (variant.score > 0) variant else variant.copy(score = (raw.size - variant.order) * 10)
-                }.sortedBy { it.score }
-                return when (quality) {
-                    QualityPreference.HIGHEST -> variants.last()
-                    QualityPreference.HIGH -> if (hasExplicitQuality) {
-                        variants.lastOrNull { it.score <= 720 } ?: variants.first()
-                    } else {
-                        variants[(variants.lastIndex - 1).coerceAtLeast(0)]
-                    }
-                    QualityPreference.STANDARD -> if (hasExplicitQuality) {
-                        variants.lastOrNull { it.score <= 480 } ?: variants.first()
-                    } else {
-                        variants.first()
-                    }
-                }.url
+                val seenUrls = HashSet<String>()
+                val seenKeys = HashSet<String>()
+                return raw.sortedWith(
+                    compareByDescending<ComponentVideoVariant> { it.score }.thenBy { it.order },
+                ).mapNotNull { variant ->
+                    val key = variant.label.ifBlank { "variant ${variant.order + 1}" }
+                    if (!seenUrls.add(variant.url) || !seenKeys.add(key)) return@mapNotNull null
+                    MediaVariant(key, variant.url)
+                }
             }
         }
         val mediaInfo = playInfo.optJSONObject("media_info") ?: playInfo
-        return bestPlaybackUrl(mediaInfo.optJSONArray("playback_list"), quality)
-            ?: bestDirectVideo(mediaInfo, quality)
+        return playbackVariants(mediaInfo.optJSONArray("playback_list"))
+            .ifEmpty { collectDirectMediaVariants(mediaInfo, MediaType.VIDEO) }
+    }
+
+    private fun bestComponentVideo(playInfo: JSONObject, quality: QualityPreference): String? {
+        return chooseMediaVariant(componentVideoVariants(playInfo), quality)?.url
     }
 
     private fun componentQualityScore(label: String): Int {
@@ -466,55 +849,85 @@ class WeiboClient(
         }
     }
 
-    private fun bestDirectVideo(data: JSONObject, quality: QualityPreference): String? = firstUrl(data, videoKeys(quality))
+    private fun bestDirectVideo(data: JSONObject, quality: QualityPreference): String? = videoKeys(quality)
+        .asSequence()
+        .mapNotNull { key ->
+            urlValue(data.opt(key))?.takeIf { isMediaVariantUrl(key, it, MediaType.VIDEO) }
+        }
+        .firstOrNull()
 
     private fun bestPlaybackUrl(list: JSONArray?, quality: QualityPreference): String? {
-        if (list == null) return null
-        val variants = ArrayList<Pair<Long, String>>()
+        return chooseMediaVariant(playbackVariants(list), quality)?.url
+    }
+
+    private fun playbackVariants(list: JSONArray?): List<MediaVariant> {
+        if (list == null) return emptyList()
+        data class Ranked(
+            val variant: MediaVariant,
+            val inferredHeight: Int,
+            val isOriginal: Boolean,
+            val tier: Int,
+            val qualityIndex: Long,
+            val order: Int,
+        )
+        val variants = ArrayList<Ranked>()
         for (index in 0 until list.length()) {
             val item = list.optJSONObject(index) ?: continue
             val info = item.optJSONObject("play_info") ?: item
-            val url = firstUrl(info, listOf("url", "stream_url", "play_url")) ?: continue
+            val url = listOf("url", "stream_url", "play_url").asSequence()
+                .mapNotNull { key ->
+                    urlValue(info.opt(key))?.takeIf { isMediaVariantUrl(key, it, MediaType.VIDEO) }
+                }
+                .firstOrNull()
+                ?: continue
             val meta = item.optJSONObject("meta")
             val qualityIndex = meta?.optLong("quality_index", item.optLong("quality_index", 0L)) ?: 0L
-            val pixels = info.optLong("width", 0L) * info.optLong("height", 0L)
-            val bitrate = info.optLong("bitrate", item.optLong("bitrate", 0L))
-            variants += (qualityIndex * 1_000_000_000_000L + pixels * 1_000L + bitrate) to url
+            val width = positiveInt(info, meta, "width")
+            val height = positiveInt(info, meta, "height")
+            val bitrate = positiveLong(info, meta, "bitrate")
+                .takeIf { it > 0L } ?: item.optLong("bitrate", 0L)
+            val label = firstTextOrEmpty(meta, "quality_desc", "quality_label", "quality_name", "label", "name")
+                .ifBlank { firstTextOrEmpty(item, "quality_desc", "quality_label", "quality_name", "label", "name") }
+            val key = when {
+                label.isNotBlank() -> label
+                height > 0 -> "${height}p"
+                bitrate > 0L -> "${(bitrate / 1000L).coerceAtLeast(1L)} kbps"
+                else -> "variant ${index + 1}"
+            }
+            val quality = MediaVariantSelector.inferVideoQuality(key, url)
+            variants += Ranked(
+                variant = MediaVariant(key, url, width, height, bitrate),
+                inferredHeight = quality.height,
+                isOriginal = quality.isOriginal,
+                tier = quality.tier,
+                qualityIndex = qualityIndex,
+                order = index,
+            )
         }
-        val sorted = variants.sortedBy { it.first }
-        if (sorted.isEmpty()) return null
-        return when (quality) {
-            QualityPreference.HIGHEST -> sorted.last()
-            QualityPreference.HIGH -> sorted.getOrElse((sorted.lastIndex * 2 + 1) / 3) { sorted.last() }
-            QualityPreference.STANDARD -> sorted[sorted.lastIndex / 2]
-        }.second
+        val seenUrls = HashSet<String>()
+        val seenKeys = HashSet<String>()
+        return variants.sortedWith(
+            compareByDescending<Ranked> { it.isOriginal }
+                .thenByDescending { maxOf(it.variant.height, it.inferredHeight) }
+                .thenByDescending { it.variant.pixelArea }
+                .thenByDescending { it.variant.bitrate }
+                .thenByDescending { it.tier }
+                .thenByDescending { it.qualityIndex }
+                .thenBy { it.order },
+        ).mapNotNull { ranked ->
+            if (!seenUrls.add(ranked.variant.url) || !seenKeys.add(ranked.variant.key)) null else ranked.variant
+        }
     }
 
-    private fun imageQualityLabel(quality: QualityPreference) = when (quality) {
-        QualityPreference.HIGHEST -> MediaQuality.ORIGINAL_BEST
-        QualityPreference.HIGH -> MediaQuality.HIGH
-        QualityPreference.STANDARD -> MediaQuality.STANDARD
-    }
-    private fun videoKeys(quality: QualityPreference) = when (quality) {
-        QualityPreference.HIGHEST -> listOf(
-            "mp4_2160p_mp4", "mp4_4k_mp4", "hevc_mp4_2160p", "mp4_1080p_mp4", "hevc_mp4_1080p",
-            "mp4_720p_mp4", "hevc_mp4_720p", "h265_mp4_hd", "inch_5_5_mp4_hd", "inch_5_mp4_hd",
-            "inch_4_mp4_hd", "mp4_hd_url", "hd_url", "stream_url_hd", "mp4_sd_url", "stream_url",
-            "original_url", "play_url", "url", "videoSrc", "video",
-        )
-        QualityPreference.HIGH -> listOf(
-            "mp4_720p_mp4", "hevc_mp4_720p", "mp4_1080p_mp4", "mp4_hd_url", "stream_url_hd",
-            "hd_url", "mp4_sd_url", "stream_url", "play_url", "url", "videoSrc", "video",
-        )
-        QualityPreference.STANDARD -> listOf(
-            "mp4_sd_url", "stream_url", "mp4_hd_url", "stream_url_hd", "play_url", "url", "videoSrc", "video",
-        )
-    }
-    private fun videoQualityLabel(quality: QualityPreference, fromPlaylist: Boolean) = when (quality) {
-        QualityPreference.HIGHEST -> if (fromPlaylist) MediaQuality.PLAYLIST_MAX else MediaQuality.HD_BEST
-        QualityPreference.HIGH -> MediaQuality.HIGH
-        QualityPreference.STANDARD -> MediaQuality.STANDARD
-    }
+    private fun imageQualityLabel(quality: QualityPreference) = MediaQuality.ORIGINAL_BEST
+    private fun videoKeys(quality: QualityPreference) = listOf(
+        "mp4_2160p_mp4", "mp4_4k_mp4", "hevc_mp4_2160p", "mp4_1080p_mp4", "hevc_mp4_1080p",
+        "mp4_720p_mp4", "hevc_mp4_720p", "h265_mp4_hd", "inch_5_5_mp4_hd", "inch_5_mp4_hd",
+        "inch_4_mp4_hd", "mp4_hd_url", "hd_url", "stream_url_hd", "mp4_sd_url", "stream_url",
+        "original_url", "play_url", "url", "videoSrc", "video",
+    )
+    private fun videoQualityLabel(quality: QualityPreference, fromPlaylist: Boolean) =
+        if (fromPlaylist) MediaQuality.PLAYLIST_MAX else MediaQuality.HD_BEST
     private fun firstText(data: JSONObject, vararg keys: String): String = keys.asSequence()
         .map { data.optString(it).trim() }
         .firstOrNull { it.isNotBlank() }

@@ -15,7 +15,7 @@ class DownloadDispatcher(
     private val cookie: String,
     private val platform: Platform = Platform.WEIBO,
 ) {
-    data class Result(val queued: Int, val alreadyRecorded: Int)
+    data class Result(val queued: Int)
 
     fun enqueueAll(post: WeiboPost, destinationTreeUri: String?): Result =
         enqueue(post, post.media, destinationTreeUri)
@@ -29,7 +29,6 @@ class DownloadDispatcher(
         val defaultFolder = folderName
         val history = DownloadHistory(context)
         var queued = 0
-        var alreadyRecorded = 0
         mediaItems.forEach { media ->
             val downloads = buildList {
                 add(media)
@@ -38,10 +37,6 @@ class DownloadDispatcher(
                 }
             }
             downloads.forEach { download ->
-                if (history.contains(download)) {
-                    alreadyRecorded++
-                    return@forEach
-                }
                 if (destinationTreeUri.isNullOrBlank()) {
                     val request = DownloadManager.Request(Uri.parse(download.url))
                         .setTitle(download.suggestedFileName())
@@ -78,7 +73,7 @@ class DownloadDispatcher(
             }
         }
         history.save()
-        return Result(queued, alreadyRecorded)
+        return Result(queued)
     }
 
     private companion object {

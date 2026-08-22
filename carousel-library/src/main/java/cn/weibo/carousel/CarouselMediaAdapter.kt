@@ -98,7 +98,7 @@ internal class CarouselMediaAdapter(
             }
             selection.setOnClickListener {
                 val item = boundItem ?: return@setOnClickListener
-                if (!item.selectable || item.downloaded) return@setOnClickListener
+                if (!item.selectable) return@setOnClickListener
                 onSelectionChanged(item, !item.selected)
             }
         }
@@ -107,7 +107,7 @@ internal class CarouselMediaAdapter(
             boundItem = item
             title.text = item.title
             subtitle.text = item.subtitle
-            selection.isEnabled = item.selectable && !item.downloaded
+            selection.isEnabled = item.selectable
             selection.contentDescription = context.getString(
                 if (item.selected) cn.weibo.carousel.R.string.wc_deselect_media
                 else cn.weibo.carousel.R.string.wc_select_media,
