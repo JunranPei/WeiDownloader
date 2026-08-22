@@ -112,6 +112,35 @@ class DouyinContentPolicyTest {
         assertEquals("1088×1440", work?.media?.single()?.selectedVariantKey)
     }
 
+    @Test fun keepsCreatorIdentityAndAvatarFromDetailResponse() {
+        val detail = JSONObject(
+            """
+            {
+              "aweme_id": "7385481927806979362",
+              "author": {
+                "nickname": "creator",
+                "sec_uid": "secure-creator-id",
+                "avatar_thumb": {"url_list": [
+                  "https://p3-pc.douyinpic.com/aweme/100x100/avatar.jpeg"
+                ]}
+              },
+              "video": {
+                "play_addr": {"url_list": [
+                  "https://v3-web.douyinvod.com/video/tos/cn/source/"
+                ]}
+              }
+            }
+            """.trimIndent(),
+        )
+
+        val creator = DouyinWorkNormalizer.normalize(detail, "7385481927806979362")?.creator
+
+        assertEquals("secure-creator-id", creator?.id)
+        assertEquals("creator", creator?.name)
+        assertTrue(creator?.avatarUrl.orEmpty().contains("avatar.jpeg"))
+        assertEquals(Platform.DOUYIN, creator?.platform)
+    }
+
     @Test fun normalizesLivePhotoAsOnePairedMediaItem() {
         val detail = JSONObject(
             """

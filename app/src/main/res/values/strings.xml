@@ -28,6 +28,21 @@
     <string name="theme_mode_title">主题模式</string>
     <string name="theme_mode_summary">跟随系统，或选择浅色与深色外观</string>
     <string name="navigate_back">返回</string>
+    <string name="creator_avatar">作者头像</string>
+    <string name="view_creator_works">查看作者的其他作品</string>
+    <string name="view_creator_works_description">查看 %1$s 的其他作品</string>
+    <string name="creator_works_title">作者作品</string>
+    <string name="creator_public_works">公开作品</string>
+    <string name="open_in_douyin">在抖音查看</string>
+    <string name="creator_loading">正在加载公开作品…</string>
+    <string name="creator_load_failed">暂时无法读取该作者的公开作品。</string>
+    <string name="creator_empty">没有找到可浏览的公开作品。</string>
+    <string name="retry">重试</string>
+    <string name="creator_work_cover">作品封面</string>
+    <string name="creator_gallery_count">图集 · %1$d 张</string>
+    <string name="creator_gallery">图集</string>
+    <string name="creator_video">视频</string>
+    <string name="creator_untitled_work">未命名作品</string>
 
     <string name="weibo_account">微博账号</string>
     <string name="douyin_settings">抖音下载</string>

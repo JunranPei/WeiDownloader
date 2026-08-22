@@ -96,6 +96,7 @@ internal data class DouyinWorkData(
     val title: String,
     val author: String,
     val media: List<MediaItem>,
+    val creator: CreatorProfile? = null,
 )
 
 internal interface DouyinDetailProvider {
@@ -164,13 +165,35 @@ internal object DouyinWorkNormalizer {
                 .orEmpty()
         }
         if (media.isEmpty()) return null
+        val author = detail.optJSONObject("author")
+        val creator = parseCreator(author)
         return DouyinWorkData(
             id = actualId,
             title = detail.stringFrom("desc", "title"),
-            author = detail.optJSONObject("author")?.stringFrom("nickname", "name").orEmpty(),
+            author = creator?.name ?: author?.stringFrom("nickname", "name").orEmpty(),
             media = media,
+            creator = creator,
         )
     }
+
+    internal fun parseCreator(author: JSONObject?): CreatorProfile? {
+        if (author == null) return null
+        val id = author.stringFrom("sec_uid", "secUid")
+        val name = author.stringFrom("nickname", "name")
+        if (id.isBlank() || name.isBlank()) return null
+        val avatar = preferredThumbnailUrl(author.optObjectFrom("avatar_thumb", "avatarThumb")).orEmpty()
+        return CreatorProfile(
+            platform = Platform.DOUYIN,
+            id = id,
+            name = name,
+            avatarUrl = avatar,
+            profileUrl = "https://www.douyin.com/user/$id",
+        )
+    }
+
+    internal fun previewImageUrl(value: Any?): String = preferredImageUrl(value)
+        ?: preferredThumbnailUrl(value)
+        ?: ""
 
     private fun parseImages(detail: JSONObject, postId: String): List<MediaItem> {
         val containers = listOfNotNull(

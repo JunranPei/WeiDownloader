@@ -31,6 +31,7 @@ import coil.ImageLoader
 import coil.decode.VideoFrameDecoder
 import coil.load
 import coil.request.videoFrameMillis
+import coil.transform.CircleCropTransformation
 import cn.weibo.carousel.CarouselMediaItem
 import cn.weibo.carousel.WeiboCarouselView
 import com.google.android.material.button.MaterialButton
@@ -55,6 +56,9 @@ class MainActivity : ComponentActivity() {
     private lateinit var mediaHeader: View
     private lateinit var mediaCarousel: WeiboCarouselView
     private lateinit var mediaQualitySegments: ComposeView
+    private lateinit var creatorCard: View
+    private lateinit var creatorAvatar: ImageView
+    private lateinit var creatorName: TextView
     private lateinit var progress: LinearProgressIndicator
     private lateinit var contentScroll: View
     private lateinit var emptyTopSpacer: View
@@ -197,6 +201,9 @@ class MainActivity : ComponentActivity() {
         mediaCarousel = findViewById(R.id.mediaCarousel)
         mediaQualitySegments = findViewById(R.id.mediaQualitySegments)
         mediaQualitySegments.setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed)
+        creatorCard = findViewById(R.id.creatorCard)
+        creatorAvatar = findViewById(R.id.creatorAvatar)
+        creatorName = findViewById(R.id.creatorName)
         contentScroll = findViewById(R.id.contentScroll)
         emptyTopSpacer = findViewById(R.id.emptyTopSpacer)
         bottomBar = findViewById(R.id.bottomBar)
@@ -287,6 +294,9 @@ class MainActivity : ComponentActivity() {
         mediaCarousel.visibility = View.GONE
         mediaQualitySegments.visibility = View.GONE
         mediaQualitySegments.setContent {}
+        creatorCard.visibility = View.GONE
+        creatorCard.setOnClickListener(null)
+        creatorAvatar.setImageDrawable(null)
     }
 
     private fun updatePlatformUi() {
@@ -356,16 +366,23 @@ class MainActivity : ComponentActivity() {
 
     private fun fillFromSharedIntent(intent: Intent?) {
         if (!::linkInput.isInitialized || intent == null) return
+        val openCreatorWork = intent.action == ACTION_OPEN_DOUYIN_WORK
         val sharedText = when {
+            openCreatorWork -> intent.getStringExtra(EXTRA_DOUYIN_WORK_URL)
             intent.action == Intent.ACTION_SEND -> intent.getStringExtra(Intent.EXTRA_TEXT)
             intent.dataString != null -> intent.dataString
             else -> null
         }.orEmpty()
         val url = firstShareUrl(sharedText) ?: return
         adoptPlatformForUrl(url)
-        lastClipboardUrl = url
+        lastClipboardUrl = if (openCreatorWork) "" else url
         linkInput.setText(url)
         linkInput.setSelection(url.length)
+        if (openCreatorWork) {
+            intent.action = Intent.ACTION_MAIN
+            intent.removeExtra(EXTRA_DOUYIN_WORK_URL)
+            linkInput.post { if (linkInput.text?.toString() == url) parsePost() }
+        }
     }
 
     private fun scheduleClipboardRead() {
@@ -429,9 +446,7 @@ class MainActivity : ComponentActivity() {
         refreshSession()
         post = null
         selectedUrls.clear()
-        mediaCarousel.submitItems(emptyList())
-        mediaCarousel.visibility = View.GONE
-        mediaQualitySegments.visibility = View.GONE
+        clearMediaPresentation()
         updateSelectionUi()
         busy(true, getString(if (platform == Platform.WEIBO) R.string.reading_post else R.string.reading_douyin))
         if (platform == Platform.DOUYIN) {
@@ -479,9 +494,7 @@ class MainActivity : ComponentActivity() {
     private fun handleReadFailure(error: Throwable) {
         post = null
         selectedUrls.clear()
-        mediaCarousel.submitItems(emptyList())
-        mediaCarousel.visibility = View.GONE
-        mediaQualitySegments.visibility = View.GONE
+        clearMediaPresentation()
         updateSelectionUi()
         busy(false, error.message ?: getString(if (platform == Platform.WEIBO) R.string.read_failed else R.string.douyin_read_failed))
     }
@@ -537,8 +550,28 @@ class MainActivity : ComponentActivity() {
             mediaCarousel.updateItems(carouselItems)
         }
         mediaCarousel.visibility = if (carouselItems.isEmpty()) View.GONE else View.VISIBLE
+        bindCreatorPresentation(value.creator)
         configureMediaQualitySegments(value)
         updateSelectionUi()
+    }
+
+    private fun bindCreatorPresentation(creator: CreatorProfile?) {
+        if (platform != Platform.DOUYIN || creator == null || creator.id.isBlank()) {
+            creatorCard.visibility = View.GONE
+            creatorCard.setOnClickListener(null)
+            return
+        }
+        creatorName.text = creator.name
+        creatorCard.contentDescription = getString(R.string.view_creator_works_description, creator.name)
+        creatorAvatar.load(creator.avatarUrl.takeIf(String::isNotBlank)) {
+            transformations(CircleCropTransformation())
+            placeholder(R.drawable.ic_account_circle_rounded)
+            error(R.drawable.ic_account_circle_rounded)
+        }
+        creatorCard.setOnClickListener {
+            startActivity(DouyinCreatorActivity.createIntent(this, creator))
+        }
+        creatorCard.visibility = View.VISIBLE
     }
 
     private fun configureMediaQualitySegments(value: WeiboPost) {
@@ -750,7 +783,9 @@ class MainActivity : ComponentActivity() {
 
     private fun toast(value: String) = Toast.makeText(this, value, Toast.LENGTH_SHORT).show()
 
-    private companion object {
-        const val STATE_PLATFORM = "state_platform"
+    companion object {
+        const val ACTION_OPEN_DOUYIN_WORK = "cn.weibo.filedownloader.action.OPEN_DOUYIN_WORK"
+        const val EXTRA_DOUYIN_WORK_URL = "douyin_work_url"
+        private const val STATE_PLATFORM = "state_platform"
     }
 }

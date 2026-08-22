@@ -162,4 +162,13 @@ data class WeiboPost(
     val author: String,
     val sourceUrl: String,
     val media: List<MediaItem>,
+    val creator: CreatorProfile? = null,
+)
+
+data class CreatorProfile(
+    val platform: Platform,
+    val id: String,
+    val name: String,
+    val avatarUrl: String = "",
+    val profileUrl: String = "",
 )

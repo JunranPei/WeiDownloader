@@ -28,6 +28,21 @@
     <string name="theme_mode_title">Theme mode</string>
     <string name="theme_mode_summary">Follow your system, or choose light or dark</string>
     <string name="navigate_back">Navigate back</string>
+    <string name="creator_avatar">Creator avatar</string>
+    <string name="view_creator_works">View more posts from this creator</string>
+    <string name="view_creator_works_description">View more posts from %1$s</string>
+    <string name="creator_works_title">Creator posts</string>
+    <string name="creator_public_works">Public posts</string>
+    <string name="open_in_douyin">View on Douyin</string>
+    <string name="creator_loading">Loading public posts…</string>
+    <string name="creator_load_failed">This creator’s public posts are temporarily unavailable.</string>
+    <string name="creator_empty">No public posts were found.</string>
+    <string name="retry">Retry</string>
+    <string name="creator_work_cover">Post cover</string>
+    <string name="creator_gallery_count">Gallery · %1$d images</string>
+    <string name="creator_gallery">Gallery</string>
+    <string name="creator_video">Video</string>
+    <string name="creator_untitled_work">Untitled post</string>
 
     <string name="weibo_account">Weibo account</string>
     <string name="douyin_settings">Douyin downloads</string>

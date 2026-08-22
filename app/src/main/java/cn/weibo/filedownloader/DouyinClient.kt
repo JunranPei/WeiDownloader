@@ -98,6 +98,7 @@ class DouyinClient(private val activity: Activity) {
                     author = work.author.ifBlank { activity.getString(R.string.douyin_default_author) },
                     sourceUrl = target.sourceUrl,
                     media = work.media,
+                    creator = work.creator,
                 )
             }
         }
