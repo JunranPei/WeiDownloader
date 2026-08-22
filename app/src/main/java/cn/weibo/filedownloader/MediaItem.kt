@@ -17,12 +17,14 @@ object MediaQuality {
     const val AUDIO_BEST = "audio_best"
     const val PLAYLIST_MAX = "playlist_max"
     const val HD_BEST = "hd_best"
+    const val PLATFORM_BEST = "platform_best"
     fun labelRes(key: String): Int = when (key) {
         ORIGINAL_BEST -> R.string.quality_original_best
         LIVE_ORIGINAL -> R.string.quality_live_original
         AUDIO_BEST -> R.string.quality_audio_best
         PLAYLIST_MAX -> R.string.quality_playlist_max
         HD_BEST -> R.string.quality_hd_best
+        PLATFORM_BEST -> R.string.quality_platform_best
         else -> R.string.quality_original_best
     }
 }

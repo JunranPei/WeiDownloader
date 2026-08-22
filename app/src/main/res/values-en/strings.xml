@@ -74,6 +74,7 @@
     <string name="quality_audio_best">Best available audio</string>
     <string name="quality_playlist_max">Highest playlist bitrate</string>
     <string name="quality_hd_best">HD / best available</string>
+    <string name="quality_platform_best">Platform best available</string>
     <string name="image_variant_original">Original</string>
     <string name="image_dimensions_unknown">Unknown dimensions</string>
     <string name="audio_bitrate_unknown">Unknown bitrate</string>
@@ -86,7 +87,7 @@
     <string name="link_required">Paste a Weibo post link first.</string>
     <string name="login_required_settings">Sign in to Weibo from Settings first.</string>
     <string name="reading_post">Reading this Weibo post…</string>
-    <string name="reading_douyin">Reading this Douyin video…</string>
+    <string name="reading_douyin">Reading this Douyin post…</string>
     <string name="identified_format">Found %1$d files · %2$d available · %3$s</string>
     <string name="read_failed">Could not read the post. Try again later.</string>
     <string name="recorded">Downloaded</string>
@@ -111,9 +112,9 @@
     <string name="switch_to_douyin">Switch to Douyin</string>
     <string name="switch_platform">Switch download platform</string>
     <string name="douyin_url_not_found">No recognizable Douyin link was found.</string>
-    <string name="douyin_no_media">No downloadable video was found on the Douyin page.</string>
-    <string name="douyin_page_no_media">The Douyin page did not return a downloadable video. Try again later.</string>
+    <string name="douyin_no_media">No trusted images or video were found for this Douyin post.</string>
+    <string name="douyin_page_no_media">Douyin did not return media matching this post. Try again later.</string>
     <string name="douyin_read_failed">Could not read Douyin. Check that the link is public and still valid.</string>
-    <string name="douyin_default_title">Douyin video</string>
+    <string name="douyin_default_title">Douyin post</string>
     <string name="douyin_default_author">Douyin user</string>
 </resources>
