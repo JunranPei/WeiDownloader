@@ -17,6 +17,13 @@ internal object WeiboLinkParser {
     private val objectIdPattern = Regex("[0-9]+:[A-Za-z0-9]+")
     private val statusIdPattern = Regex("[A-Za-z0-9]+")
 
+    /** Weibo's copied text can contain prompts around the actual URL. */
+    fun extractUrl(value: String): String {
+        val found = Regex("https?://[^\\s<>\"']+", RegexOption.IGNORE_CASE)
+            .find(value.trim())?.value.orEmpty()
+        return found.trimEnd('.', '。', '，', ',', '！', '!', '）', ')')
+    }
+
     fun targetFromUrl(address: String): WeiboLinkTarget? = runCatching {
         val uri = URI(address)
         val host = uri.host?.lowercase() ?: return@runCatching null

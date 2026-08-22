@@ -6,6 +6,16 @@ import org.junit.Test
 
 class WeiboLinkParserTest {
     @Test
+    fun extractsUrlFromCopiedShareText() {
+        assertEquals(
+            "https://m.weibo.cn/detail/5226684729265742",
+            WeiboLinkParser.extractUrl(
+                "分享微博正文  https://m.weibo.cn/detail/5226684729265742  点击查看！",
+            ),
+        )
+    }
+
+    @Test
     fun recognizesVideoComponentFamilies() {
         assertVideo(
             "https://video.weibo.com/show?fid=1034:5210889180348492",
