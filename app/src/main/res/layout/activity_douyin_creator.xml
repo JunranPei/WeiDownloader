@@ -97,7 +97,7 @@
         android:paddingStart="12dp"
         android:paddingTop="14dp"
         android:paddingEnd="12dp"
-        android:paddingBottom="24dp"
+        android:paddingBottom="92dp"
         app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
@@ -140,4 +140,27 @@
             android:text="@string/retry"
             android:visibility="gone" />
     </LinearLayout>
+
+    <FrameLayout
+        android:id="@+id/creatorDownloadBar"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="12dp"
+        android:padding="4dp"
+        android:visibility="gone"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent">
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/creatorQuickDownload"
+            style="@style/Widget.Material3.Button"
+            android:layout_width="wrap_content"
+            android:layout_height="48dp"
+            android:elevation="10dp"
+            android:minWidth="0dp"
+            android:paddingStart="22dp"
+            android:paddingEnd="22dp"
+            android:text="@string/creator_quick_download" />
+    </FrameLayout>
 </androidx.constraintlayout.widget.ConstraintLayout>

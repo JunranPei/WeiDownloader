@@ -43,6 +43,15 @@
     <string name="creator_gallery">Gallery</string>
     <string name="creator_video">Video</string>
     <string name="creator_untitled_work">Untitled post</string>
+    <string name="select_creator_work">Select this post for quick download</string>
+    <string name="deselect_creator_work">Deselect this post</string>
+    <string name="creator_quick_download">Quick download</string>
+    <string name="creator_quick_download_count">Quick download (%1$d)</string>
+    <string name="creator_quick_download_progress">Processing %1$d/%2$d</string>
+    <string name="creator_quick_download_complete">Downloading %1$d files</string>
+    <string name="creator_quick_download_partial">Downloading %1$d files; %2$d posts failed</string>
+    <string name="creator_quick_download_failed">The selected posts could not be downloaded</string>
+    <string name="creator_quick_download_no_new_media">The selected posts have no new files to download</string>
 
     <string name="weibo_account">Weibo account</string>
     <string name="douyin_settings">Douyin downloads</string>

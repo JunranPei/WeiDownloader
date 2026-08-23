@@ -43,6 +43,15 @@
     <string name="creator_gallery">图集</string>
     <string name="creator_video">视频</string>
     <string name="creator_untitled_work">未命名作品</string>
+    <string name="select_creator_work">选择此作品以快速下载</string>
+    <string name="deselect_creator_work">取消选择此作品</string>
+    <string name="creator_quick_download">快速下载</string>
+    <string name="creator_quick_download_count">快速下载（%1$d）</string>
+    <string name="creator_quick_download_progress">正在处理 %1$d/%2$d</string>
+    <string name="creator_quick_download_complete">已开始下载 %1$d 个文件</string>
+    <string name="creator_quick_download_partial">已开始下载 %1$d 个文件；%2$d 个作品处理失败</string>
+    <string name="creator_quick_download_failed">所选作品暂时无法下载</string>
+    <string name="creator_quick_download_no_new_media">所选作品没有新的可下载文件</string>
 
     <string name="weibo_account">微博账号</string>
     <string name="douyin_settings">抖音下载</string>

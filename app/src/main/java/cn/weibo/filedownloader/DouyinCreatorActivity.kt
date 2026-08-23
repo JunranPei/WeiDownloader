@@ -11,8 +11,10 @@ import android.util.Log
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.widget.ImageButton
 import android.widget.ImageView
 import android.widget.TextView
+import android.widget.Toast
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
@@ -23,6 +25,7 @@ import coil.transform.CircleCropTransformation
 import com.google.android.material.appbar.MaterialToolbar
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.progressindicator.CircularProgressIndicator
+import java.util.ArrayDeque
 import java.util.concurrent.Executors
 
 class DouyinCreatorActivity : Activity() {
@@ -38,6 +41,15 @@ class DouyinCreatorActivity : Activity() {
     private lateinit var stateText: TextView
     private lateinit var progress: CircularProgressIndicator
     private lateinit var retry: MaterialButton
+    private lateinit var quickDownloadBar: View
+    private lateinit var quickDownloadButton: MaterialButton
+    private var quickDownloadClient: DouyinClient? = null
+    private val quickDownloadQueue = ArrayDeque<DouyinCreatorWork>()
+    private var quickDownloadTotal = 0
+    private var quickDownloadProcessed = 0
+    private var quickDownloadQueued = 0
+    private var quickDownloadFailures = 0
+    private var quickDownloading = false
     private var cursor = 0L
     private var hasMore = true
     private var loading = false
@@ -75,7 +87,9 @@ class DouyinCreatorActivity : Activity() {
         stateText = findViewById(R.id.creatorStateText)
         progress = findViewById(R.id.creatorProgress)
         retry = findViewById(R.id.creatorRetry)
-        adapter = CreatorWorksAdapter(::openWork)
+        quickDownloadBar = findViewById(R.id.creatorDownloadBar)
+        quickDownloadButton = findViewById(R.id.creatorQuickDownload)
+        adapter = CreatorWorksAdapter(::openWork, ::updateQuickDownloadSelection)
         val columns = if (resources.configuration.screenWidthDp >= 600) 3 else 2
         val layoutManager = GridLayoutManager(this, columns)
         worksList.layoutManager = layoutManager
@@ -102,6 +116,7 @@ class DouyinCreatorActivity : Activity() {
         findViewById<MaterialButton>(R.id.openCreatorInDouyin).setOnClickListener {
             runCatching { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(creator.profileUrl))) }
         }
+        quickDownloadButton.setOnClickListener { startQuickDownload() }
     }
 
     private fun bindCreator(value: CreatorProfile) {
@@ -188,25 +203,124 @@ class DouyinCreatorActivity : Activity() {
     }
 
     private fun openWork(work: DouyinCreatorWork) {
+        if (quickDownloading) return
         startActivity(
             Intent(this, MainActivity::class.java)
                 .setAction(MainActivity.ACTION_OPEN_DOUYIN_WORK)
-                .putExtra(MainActivity.EXTRA_DOUYIN_WORK_URL, work.sourceUrl)
-                .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP),
+                .putExtra(MainActivity.EXTRA_DOUYIN_WORK_URL, work.sourceUrl),
         )
+    }
+
+    private fun updateQuickDownloadSelection(count: Int) {
+        if (quickDownloading) return
+        quickDownloadBar.visibility = if (count > 0) View.VISIBLE else View.GONE
+        quickDownloadButton.text = if (count > 0) {
+            getString(R.string.creator_quick_download_count, count)
+        } else {
+            getString(R.string.creator_quick_download)
+        }
+    }
+
+    private fun startQuickDownload() {
+        if (quickDownloading) return
+        val selected = adapter.selectedWorks()
+        if (selected.isEmpty()) return
+        quickDownloading = true
+        quickDownloadQueue.clear()
+        quickDownloadQueue.addAll(selected)
+        quickDownloadTotal = selected.size
+        quickDownloadProcessed = 0
+        quickDownloadQueued = 0
+        quickDownloadFailures = 0
+        adapter.setInteractionsEnabled(false)
+        quickDownloadButton.isEnabled = false
+        resolveNextQuickDownload()
+    }
+
+    private fun resolveNextQuickDownload() {
+        val work = if (quickDownloadQueue.isEmpty()) null else quickDownloadQueue.removeFirst()
+        if (work == null) {
+            finishQuickDownload()
+            return
+        }
+        quickDownloadButton.text = getString(
+            R.string.creator_quick_download_progress,
+            quickDownloadProcessed + 1,
+            quickDownloadTotal,
+        )
+        val client = DouyinClient(this)
+        quickDownloadClient = client
+        client.loadPost(work.sourceUrl, QualityPreference.HIGHEST) { result ->
+            runOnUiThread {
+                if (!quickDownloading || isFinishing || isDestroyed) {
+                    client.close()
+                    return@runOnUiThread
+                }
+                result.fold(
+                    onSuccess = ::enqueueQuickDownloadPost,
+                    onFailure = {
+                        quickDownloadFailures++
+                        Log.w(LOG_TAG, "Could not resolve selected work ${work.id}", it)
+                    },
+                )
+                client.close()
+                if (quickDownloadClient === client) quickDownloadClient = null
+                quickDownloadProcessed++
+                resolveNextQuickDownload()
+            }
+        }
+    }
+
+    private fun enqueueQuickDownloadPost(post: WeiboPost) {
+        val history = DownloadHistory(this)
+        val freshMedia = post.media.filterNot(history::contains)
+        if (freshMedia.isEmpty()) return
+        try {
+            val destinationTreeUri = getSharedPreferences("downloader_settings", MODE_PRIVATE)
+                .getString("destination_uri", null)
+            quickDownloadQueued += DownloadDispatcher(this, "", Platform.DOUYIN)
+                .enqueueSelected(post, freshMedia, destinationTreeUri)
+                .queued
+        } catch (error: Exception) {
+            quickDownloadFailures++
+            Log.w(LOG_TAG, "Could not enqueue selected work ${post.id}", error)
+        }
+    }
+
+    private fun finishQuickDownload() {
+        quickDownloading = false
+        quickDownloadClient = null
+        adapter.clearSelection()
+        adapter.setInteractionsEnabled(true)
+        quickDownloadButton.isEnabled = true
+        updateQuickDownloadSelection(0)
+        val message = when {
+            quickDownloadQueued > 0 && quickDownloadFailures > 0 -> getString(
+                R.string.creator_quick_download_partial,
+                quickDownloadQueued,
+                quickDownloadFailures,
+            )
+            quickDownloadQueued > 0 -> getString(R.string.creator_quick_download_complete, quickDownloadQueued)
+            quickDownloadFailures > 0 -> getString(R.string.creator_quick_download_failed)
+            else -> getString(R.string.creator_quick_download_no_new_media)
+        }
+        Toast.makeText(this, message, Toast.LENGTH_LONG).show()
     }
 
     private fun applyInsets() {
         val root = findViewById<View>(R.id.creatorRoot)
         val toolbar = findViewById<View>(R.id.creatorToolbar)
+        val downloadBar = findViewById<View>(R.id.creatorDownloadBar)
         val toolbarPadding = intArrayOf(toolbar.paddingLeft, toolbar.paddingTop, toolbar.paddingRight, toolbar.paddingBottom)
         val listPadding = intArrayOf(worksList.paddingLeft, worksList.paddingTop, worksList.paddingRight, worksList.paddingBottom)
+        val downloadPadding = intArrayOf(downloadBar.paddingLeft, downloadBar.paddingTop, downloadBar.paddingRight, downloadBar.paddingBottom)
         val toolbarMinHeight = toolbar.minimumHeight
         ViewCompat.setOnApplyWindowInsetsListener(root) { _, insets ->
             val safe = insets.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout())
             toolbar.minimumHeight = toolbarMinHeight + safe.top
             toolbar.setPadding(toolbarPadding[0] + safe.left, toolbarPadding[1] + safe.top, toolbarPadding[2] + safe.right, toolbarPadding[3])
             worksList.setPadding(listPadding[0] + safe.left, listPadding[1], listPadding[2] + safe.right, listPadding[3] + safe.bottom)
+            downloadBar.setPadding(downloadPadding[0] + safe.left, downloadPadding[1], downloadPadding[2] + safe.right, downloadPadding[3] + safe.bottom)
             insets
         }
         ViewCompat.requestApplyInsets(root)
@@ -227,6 +341,8 @@ class DouyinCreatorActivity : Activity() {
     }
 
     override fun onDestroy() {
+        quickDownloading = false
+        quickDownloadClient?.close()
         webLoader?.close()
         executor.shutdownNow()
         super.onDestroy()
@@ -250,9 +366,12 @@ class DouyinCreatorActivity : Activity() {
 
 private class CreatorWorksAdapter(
     private val onClick: (DouyinCreatorWork) -> Unit,
+    private val onSelectionChanged: (Int) -> Unit,
 ) : RecyclerView.Adapter<CreatorWorksAdapter.Holder>() {
     private val items = mutableListOf<DouyinCreatorWork>()
     private val ids = hashSetOf<String>()
+    private val selectedIds = linkedSetOf<String>()
+    private var interactionsEnabled = true
 
     fun append(values: List<DouyinCreatorWork>) {
         val fresh = values.filter { ids.add(it.id) }
@@ -260,6 +379,21 @@ private class CreatorWorksAdapter(
         val start = items.size
         items += fresh
         notifyItemRangeInserted(start, fresh.size)
+    }
+
+    fun selectedWorks(): List<DouyinCreatorWork> = items.filter { it.id in selectedIds }
+
+    fun clearSelection() {
+        if (selectedIds.isEmpty()) return
+        selectedIds.clear()
+        notifyItemRangeChanged(0, itemCount)
+        onSelectionChanged(0)
+    }
+
+    fun setInteractionsEnabled(enabled: Boolean) {
+        if (interactionsEnabled == enabled) return
+        interactionsEnabled = enabled
+        notifyItemRangeChanged(0, itemCount)
     }
 
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): Holder = Holder(
@@ -285,12 +419,27 @@ private class CreatorWorksAdapter(
         } else {
             holder.itemView.context.getString(R.string.creator_video)
         }
-        holder.itemView.setOnClickListener { onClick(item) }
+        val selected = item.id in selectedIds
+        holder.selection.isSelected = selected
+        holder.selection.isEnabled = interactionsEnabled
+        holder.selection.contentDescription = holder.itemView.context.getString(
+            if (selected) R.string.deselect_creator_work else R.string.select_creator_work,
+        )
+        holder.selection.setOnClickListener {
+            if (!interactionsEnabled) return@setOnClickListener
+            if (!selectedIds.add(item.id)) selectedIds.remove(item.id)
+            holder.bindingAdapterPosition
+                .takeIf { it != RecyclerView.NO_POSITION }
+                ?.let(::notifyItemChanged)
+            onSelectionChanged(selectedIds.size)
+        }
+        holder.itemView.setOnClickListener { if (interactionsEnabled) onClick(item) }
     }
 
     class Holder(view: View) : RecyclerView.ViewHolder(view) {
         val cover: ImageView = view.findViewById(R.id.creatorWorkCover)
         val title: TextView = view.findViewById(R.id.creatorWorkTitle)
         val type: TextView = view.findViewById(R.id.creatorWorkType)
+        val selection: ImageButton = view.findViewById(R.id.creatorWorkSelected)
     }
 }
