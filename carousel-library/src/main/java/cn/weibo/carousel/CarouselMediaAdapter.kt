@@ -132,8 +132,8 @@ internal class CarouselMediaAdapter(
             val background = GradientDrawable().apply {
                 shape = GradientDrawable.OVAL
                 when {
-                    item.downloaded -> setColor(surfaceContainer)
                     item.selected -> setColor(primary)
+                    item.downloaded -> setColor(surfaceContainer)
                     else -> setColor(surfaceContainerLow)
                 }
             }
@@ -142,7 +142,7 @@ internal class CarouselMediaAdapter(
             selection.setImageDrawable(
                 if (item.selected || item.downloaded) {
                     ContextCompat.getDrawable(context, cn.weibo.carousel.R.drawable.wc_check)?.mutate()?.also {
-                        it.setTint(if (item.downloaded) onSurfaceVariant else onPrimary)
+                        it.setTint(if (item.selected) onPrimary else onSurfaceVariant)
                     }
                 } else null,
             )

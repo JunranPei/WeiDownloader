@@ -18,6 +18,9 @@ class LoginActivity : Activity() {
     override fun attachBaseContext(newBase: android.content.Context) { super.attachBaseContext(ThemeController.wrap(newBase)) }
     private lateinit var webView: WebView
     private lateinit var doneButton: MaterialButton
+    private val handler = android.os.Handler(android.os.Looper.getMainLooper())
+    private val platformKey by lazy { intent.getStringExtra(EXTRA_PLATFORM).orEmpty() }
+    private val isDouyin get() = platformKey == Platform.DOUYIN.key
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -28,6 +31,7 @@ class LoginActivity : Activity() {
         webView = findViewById<WebView>(R.id.loginWebView).apply {
             settings.javaScriptEnabled = true
             settings.domStorageEnabled = true
+            if (isDouyin) settings.userAgentString = DOUYIN_WEB_USER_AGENT
             settings.useWideViewPort = true
             settings.loadWithOverviewMode = true
             settings.setSupportZoom(true)
@@ -35,9 +39,17 @@ class LoginActivity : Activity() {
             settings.displayZoomControls = false
             settings.textZoom = 100
             webChromeClient = WebChromeClient()
-            webViewClient = WebViewClient()
+            webViewClient = object : WebViewClient() {
+                override fun onPageFinished(view: WebView, url: String) {
+                    refreshLoginState()
+                }
+            }
             setInitialScale(0)
-            loadUrl("https://passport.weibo.com/")
+            CookieManager.getInstance().also { manager ->
+                manager.setAcceptCookie(true)
+                manager.setAcceptThirdPartyCookies(this, true)
+            }
+            loadUrl(if (isDouyin) DOUYIN_LOGIN_URL else WEIBO_LOGIN_URL)
         }
         doneButton.setOnClickListener {
             CookieManager.getInstance().flush()
@@ -59,9 +71,23 @@ class LoginActivity : Activity() {
             windowInsets
         }
         ViewCompat.requestApplyInsets(root)
+        refreshLoginState()
+        handler.postDelayed(::pollLoginState, LOGIN_POLL_MS)
+    }
+
+    private fun pollLoginState() {
+        if (isFinishing || isDestroyed) return
+        refreshLoginState()
+        handler.postDelayed(::pollLoginState, LOGIN_POLL_MS)
+    }
+
+    private fun refreshLoginState() {
+        val signedIn = if (isDouyin) DouyinSession.isSignedIn() else WeiboSession.isSignedIn()
+        doneButton.setText(if (signedIn) R.string.login_done_ready else R.string.login_done_waiting)
     }
 
     override fun onDestroy() {
+        handler.removeCallbacksAndMessages(null)
         webView.stopLoading()
         webView.webChromeClient = null
         webView.destroy()
@@ -81,5 +107,16 @@ class LoginActivity : Activity() {
             isAppearanceLightStatusBars = lightSystemBars
             isAppearanceLightNavigationBars = lightSystemBars
         }
+    }
+
+    companion object {
+        const val EXTRA_PLATFORM = "platform"
+        private const val WEIBO_LOGIN_URL = "https://passport.weibo.com/"
+        private const val DOUYIN_LOGIN_URL =
+            "https://sso.douyin.com/?service=www.douyin.com%2Flogin%3Ftype%3Dstormplatform_home"
+        private const val DOUYIN_WEB_USER_AGENT =
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
+                "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
+        private const val LOGIN_POLL_MS = 1_000L
     }
 }

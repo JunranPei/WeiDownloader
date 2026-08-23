@@ -87,7 +87,13 @@ class SettingsActivity : ComponentActivity() {
         resetDestinationButton = findViewById(R.id.settingsDestinationReset)
         liveCoverSwitch = findViewById(R.id.settingsLiveCoverSwitch)
         findViewById<View>(R.id.settingsBackButton).setOnClickListener { finish() }
-        loginButton.setOnClickListener { startActivityForResult(Intent(this, LoginActivity::class.java), loginRequest) }
+        loginButton.setOnClickListener {
+            startActivityForResult(
+                Intent(this, LoginActivity::class.java)
+                    .putExtra(LoginActivity.EXTRA_PLATFORM, if (isDouyin) Platform.DOUYIN.key else Platform.WEIBO.key),
+                loginRequest,
+            )
+        }
         findViewById<View>(R.id.settingsAboutCard).setOnClickListener {
             startActivity(Intent(this, AboutActivity::class.java))
         }
@@ -103,12 +109,8 @@ class SettingsActivity : ComponentActivity() {
             if (isDouyin) R.string.douyin_settings_title else R.string.settings,
         )
         findViewById<TextView>(R.id.settingsPlatformSectionTitle).text = getString(
-            if (isDouyin) R.string.douyin_settings else R.string.weibo_account,
+            if (isDouyin) R.string.douyin_account else R.string.weibo_account,
         )
-        if (isDouyin) {
-            loginStatus.text = getString(R.string.douyin_settings_no_login)
-            loginButton.visibility = View.GONE
-        }
     }
     private fun configureLiveCover() {
         liveCoverSwitch.isChecked = preferences.getBoolean("live_cover", false)
@@ -241,7 +243,11 @@ class SettingsActivity : ComponentActivity() {
     private fun refreshLoginState() {
         if (!::loginStatus.isInitialized) return
         if (isDouyin) {
-            loginStatus.text = getString(R.string.douyin_settings_no_login)
+            val loggedIn = DouyinSession.isSignedIn()
+            loginStatus.text = getString(
+                if (loggedIn) R.string.douyin_login_active else R.string.douyin_login_inactive,
+            )
+            loginButton.text = getString(if (loggedIn) R.string.login_again else R.string.login_douyin)
             return
         }
         val loggedIn = WeiboSession.isSignedIn()

@@ -54,13 +54,17 @@
     <string name="creator_quick_download_no_new_media">The selected posts have no new files to download</string>
 
     <string name="weibo_account">Weibo account</string>
+    <string name="douyin_account">Douyin account</string>
     <string name="douyin_settings">Douyin downloads</string>
     <string name="douyin_settings_no_login">Public Douyin links do not require sign-in</string>
     <string name="checking_login">Checking sign-in status…</string>
     <string name="login_weibo">Sign in to Weibo</string>
+    <string name="login_douyin">Sign in to Douyin</string>
     <string name="login_again">Sign in again</string>
     <string name="login_active">Signed in. This session is only used to read posts you can access.</string>
     <string name="login_inactive">Not signed in. Sign in before processing a Weibo post.</string>
+    <string name="douyin_login_active">Signed in. This session is used to load complete public creator posts.</string>
+    <string name="douyin_login_inactive">Not signed in. Single posts still work; sign in to load complete creator posts.</string>
     <string name="login_done_waiting">Finish after sign-in</string>
     <string name="login_done_ready">Signed in · Done</string>
     <string name="download_settings">Download settings</string>
@@ -100,6 +104,7 @@
     <string name="quality_hd_best">HD / best available</string>
     <string name="quality_platform_best">Platform best available</string>
     <string name="image_variant_original">Original</string>
+    <string name="focused_media_options">%1$d. %2$s options</string>
     <string name="image_dimensions_unknown">Unknown dimensions</string>
     <string name="audio_bitrate_unknown">Unknown bitrate</string>
     <string name="media_image">Image</string>
@@ -113,6 +118,7 @@
     <string name="reading_post">Reading this Weibo post…</string>
     <string name="reading_douyin">Reading this Douyin post…</string>
     <string name="identified_format">Found %1$d files · %2$d available · %3$s</string>
+    <string name="identified_media_format">Found %1$d files · %2$d available</string>
     <string name="read_failed">Could not read the post. Try again later.</string>
     <string name="recorded">Downloaded</string>
     <string name="pending_download">Ready</string>

@@ -11,17 +11,20 @@ class DownloadHistory(context: Context) {
     private val entries = JSONObject(preferences.getString(key, "{}") ?: "{}")
 
     fun contains(media: MediaItem): Boolean {
-        // New records distinguish the stable source item and the selected
-        // source variant, so downloading mw2000 does not block the original.
-        if (entries.has(hash(historyKey(media)))) return true
+        // Signed media URLs change between requests. A download therefore
+        // belongs to the stable source item and selected source variant.
+        if (entries.has(hash(DownloadHistoryKeys.stable(media)))) return true
 
-        // Keep reading records written by older builds. Their URL-only key
-        // only matches when the currently selected URL is exactly the same.
+        // Keep reading records written by builds that included the current
+        // signed URL in their otherwise stable key.
+        if (entries.has(hash(DownloadHistoryKeys.legacyComposite(media)))) return true
+
+        // Oldest records used only the URL.
         return entries.has(hash(media.url))
     }
 
     fun remember(media: MediaItem) {
-        entries.put(hash(historyKey(media)), System.currentTimeMillis())
+        entries.put(hash(DownloadHistoryKeys.stable(media)), System.currentTimeMillis())
     }
 
     fun save() {
@@ -35,11 +38,18 @@ class DownloadHistory(context: Context) {
     private fun hash(value: String): String = MessageDigest.getInstance("SHA-256")
         .digest(value.toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it.toInt() and 0xff) }
 
-    private fun historyKey(media: MediaItem): String = listOf(
+    private companion object { const val MAX_ENTRIES = 2_000 }
+}
+
+internal object DownloadHistoryKeys {
+    fun stable(media: MediaItem): String = listOf(
+        media.stableId,
+        media.selectedVariantKey ?: media.quality,
+    ).joinToString("|")
+
+    fun legacyComposite(media: MediaItem): String = listOf(
         media.stableId,
         media.selectedVariantKey.orEmpty(),
         media.url,
     ).joinToString("|")
-
-    private companion object { const val MAX_ENTRIES = 2_000 }
 }

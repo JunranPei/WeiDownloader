@@ -28,14 +28,12 @@ class DownloadDispatcher(
         val folderName = DownloadOrganization.folderName(context, post.author, post.id)
         val defaultFolder = folderName
         val history = DownloadHistory(context)
+        val includeLiveCover = context
+            .getSharedPreferences("downloader_settings", Context.MODE_PRIVATE)
+            .getBoolean("live_cover", false)
         var queued = 0
         mediaItems.forEach { media ->
-            val downloads = buildList {
-                add(media)
-                if (media.type == MediaType.LIVE_PHOTO && media.coverUrl.isNotBlank()) {
-                    add(media.copy(type = MediaType.IMAGE, url = media.coverUrl, quality = MediaQuality.ORIGINAL_BEST, coverUrl = ""))
-                }
-            }
+            val downloads = DownloadMediaPlanner.expand(media, includeLiveCover)
             downloads.forEach { download ->
                 if (destinationTreeUri.isNullOrBlank()) {
                     val request = DownloadManager.Request(Uri.parse(download.url))
@@ -85,4 +83,20 @@ class DownloadDispatcher(
             Platform.WEIBO -> "https://weibo.com/"
             Platform.DOUYIN -> "https://www.douyin.com/"
         }
+}
+
+internal object DownloadMediaPlanner {
+    fun expand(media: MediaItem, includeLiveCover: Boolean): List<MediaItem> = buildList {
+        add(media)
+        if (includeLiveCover && media.type == MediaType.LIVE_PHOTO && media.coverUrl.isNotBlank()) {
+            add(
+                media.copy(
+                    type = MediaType.IMAGE,
+                    url = media.coverUrl,
+                    quality = MediaQuality.ORIGINAL_BEST,
+                    coverUrl = "",
+                ),
+            )
+        }
+    }
 }

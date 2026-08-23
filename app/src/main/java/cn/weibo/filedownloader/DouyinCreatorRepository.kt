@@ -141,7 +141,7 @@ internal class DouyinCreatorRepository {
 
         const val POST_ENDPOINT = "https://www.douyin.com/aweme/v1/web/aweme/post/"
         const val WEB_USER_AGENT = "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)"
-        const val PAGE_SIZE = 12
+        const val PAGE_SIZE = 18
         val REQUEST_PROFILES = listOf(
             RequestProfile(
                 name = "pc-googlebot",

@@ -204,27 +204,45 @@
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:layout_marginStart="20dp"
-                android:layout_marginTop="6dp"
+                android:layout_marginTop="8dp"
                 android:layout_marginEnd="20dp"
                 android:text="@string/results_empty"
                 android:textAppearance="?attr/textAppearanceBodyMedium"
                 android:textColor="?attr/colorOnSurfaceVariant"
                 android:visibility="gone" />
 
+            <cn.weibo.carousel.WeiboCarouselView
+                android:id="@+id/mediaCarousel"
+                android:layout_width="match_parent"
+                android:layout_height="280dp"
+                android:layout_marginTop="8dp"
+                android:clipToPadding="false"
+                android:clipChildren="false"
+                android:overScrollMode="never"
+                android:visibility="gone" />
+
+            <androidx.compose.ui.platform.ComposeView
+                android:id="@+id/mediaQualitySegments"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="20dp"
+                android:layout_marginTop="8dp"
+                android:layout_marginEnd="20dp"
+                android:visibility="gone" />
+
             <com.google.android.material.card.MaterialCardView
                 android:id="@+id/creatorCard"
-                style="@style/Widget.Material3.CardView.Filled"
                 android:layout_width="match_parent"
                 android:layout_height="72dp"
                 android:layout_marginStart="20dp"
-                android:layout_marginTop="10dp"
+                android:layout_marginTop="16dp"
                 android:layout_marginEnd="20dp"
                 android:clickable="true"
                 android:focusable="true"
                 android:foreground="?attr/selectableItemBackground"
                 android:visibility="gone"
                 app:cardBackgroundColor="?attr/colorSurfaceContainerHigh"
-                app:cardCornerRadius="20dp"
+                app:cardCornerRadius="28dp"
                 app:strokeWidth="0dp">
 
                 <LinearLayout
@@ -258,12 +276,15 @@
                             android:ellipsize="end"
                             android:maxLines="1"
                             android:textAppearance="?attr/textAppearanceTitleSmall"
+                            android:textColor="?attr/colorOnSurface"
                             android:textStyle="bold" />
 
                         <TextView
                             android:layout_width="match_parent"
                             android:layout_height="wrap_content"
                             android:layout_marginTop="2dp"
+                            android:ellipsize="end"
+                            android:maxLines="1"
                             android:text="@string/view_creator_works"
                             android:textAppearance="?attr/textAppearanceBodyMedium"
                             android:textColor="?attr/colorOnSurfaceVariant" />
@@ -277,25 +298,6 @@
                         app:tint="?attr/colorOnSurfaceVariant" />
                 </LinearLayout>
             </com.google.android.material.card.MaterialCardView>
-
-            <cn.weibo.carousel.WeiboCarouselView
-                android:id="@+id/mediaCarousel"
-                android:layout_width="match_parent"
-                android:layout_height="280dp"
-                android:layout_marginTop="8dp"
-                android:clipToPadding="false"
-                android:clipChildren="false"
-                android:overScrollMode="never"
-                android:visibility="gone" />
-
-            <androidx.compose.ui.platform.ComposeView
-                android:id="@+id/mediaQualitySegments"
-                android:layout_width="match_parent"
-                android:layout_height="wrap_content"
-                android:layout_marginStart="20dp"
-                android:layout_marginTop="8dp"
-                android:layout_marginEnd="20dp"
-                android:visibility="gone" />
 
         </LinearLayout>
     </androidx.core.widget.NestedScrollView>

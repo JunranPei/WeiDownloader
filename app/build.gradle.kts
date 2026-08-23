@@ -12,8 +12,8 @@ android {
         applicationId = "cn.weibo.filedownloader"
         minSdk = 24
         targetSdk = 35
-        versionCode = 39
-        versionName = "0.0.31"
+        versionCode = 41
+        versionName = "0.0.33"
     }
 
     compileOptions {
@@ -58,6 +58,7 @@ dependencies {
     implementation("androidx.recyclerview:recyclerview:1.4.0")
     implementation("androidx.documentfile:documentfile:1.0.1")
     implementation("androidx.work:work-runtime:2.10.1")
+    implementation("androidx.webkit:webkit:1.17.0")
     implementation("io.coil-kt:coil:2.7.0")
     implementation("io.coil-kt:coil-video:2.7.0")
     implementation("androidx.compose.ui:ui:1.7.8")

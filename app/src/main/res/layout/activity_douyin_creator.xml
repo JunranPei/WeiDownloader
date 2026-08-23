@@ -6,20 +6,37 @@
     android:layout_height="match_parent"
     android:background="?attr/colorSurface">
 
-    <com.google.android.material.appbar.MaterialToolbar
+    <LinearLayout
         android:id="@+id/creatorToolbar"
         android:layout_width="0dp"
         android:layout_height="wrap_content"
         android:background="?attr/colorSurface"
+        android:gravity="center_vertical"
         android:minHeight="64dp"
-        android:paddingStart="8dp"
-        android:paddingEnd="8dp"
+        android:orientation="horizontal"
+        android:paddingStart="12dp"
+        android:paddingEnd="20dp"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toTopOf="parent"
-        app:navigationIcon="@drawable/ic_arrow_back"
-        app:title="@string/creator_works_title"
-        app:titleTextAppearance="?attr/textAppearanceTitleLarge" />
+        app:layout_constraintTop_toTopOf="parent">
+
+        <ImageButton
+            android:id="@+id/creatorBackButton"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:background="?attr/selectableItemBackgroundBorderless"
+            android:contentDescription="@string/navigate_back"
+            android:padding="12dp"
+            android:src="@drawable/ic_arrow_back_rounded" />
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="8dp"
+            android:text="@string/creator_works_title"
+            android:textAppearance="?attr/textAppearanceTitleLarge"
+            android:textColor="?attr/colorOnSurface" />
+    </LinearLayout>
 
     <com.google.android.material.card.MaterialCardView
         android:id="@+id/creatorProfileCard"

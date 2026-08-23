@@ -70,6 +70,7 @@ class MainActivity : ComponentActivity() {
     private var platform = Platform.WEIBO
     private var appliedThemeMode = ThemeController.MODE_SYSTEM
     private var douyinClient: DouyinClient? = null
+    private var focusedMediaIndex = 0
     private val selectedUrls = LinkedHashSet<String>()
     private var lastClipboardUrl = ""
     private val clipboardListener = ClipboardManager.OnPrimaryClipChangedListener {
@@ -236,6 +237,10 @@ class MainActivity : ComponentActivity() {
             if (selected) selectedUrls += item.id else selectedUrls -= item.id
             updateSelectionUi()
         }
+        mediaCarousel.onFocusChanged = { _, index ->
+            focusedMediaIndex = index
+            post?.let { configureMediaQualitySegments(it, index) }
+        }
         mediaCarousel.onItemClick = { item ->
             if (item.selectable) {
                 if (selectedUrls.contains(item.id)) selectedUrls -= item.id else selectedUrls += item.id
@@ -290,6 +295,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun clearMediaPresentation() {
+        focusedMediaIndex = 0
         mediaCarousel.submitItems(emptyList())
         mediaCarousel.visibility = View.GONE
         mediaQualitySegments.visibility = View.GONE
@@ -488,7 +494,12 @@ class MainActivity : ComponentActivity() {
         selectedUrls += loaded.media.filterNot { history.contains(it) }.map { it.url }
         showMedia(loaded)
         val available = selectedUrls.size
-        busy(false, getString(R.string.identified_format, loaded.media.size, available, loaded.author))
+        val summary = if (platform == Platform.DOUYIN && loaded.creator?.id?.isNotBlank() == true) {
+            getString(R.string.identified_media_format, loaded.media.size, available)
+        } else {
+            getString(R.string.identified_format, loaded.media.size, available, loaded.author)
+        }
+        busy(false, summary)
     }
 
     private fun handleReadFailure(error: Throwable) {
@@ -551,7 +562,7 @@ class MainActivity : ComponentActivity() {
         }
         mediaCarousel.visibility = if (carouselItems.isEmpty()) View.GONE else View.VISIBLE
         bindCreatorPresentation(value.creator)
-        configureMediaQualitySegments(value)
+        configureMediaQualitySegments(value, focusedMediaIndex)
         updateSelectionUi()
     }
 
@@ -574,53 +585,45 @@ class MainActivity : ComponentActivity() {
         creatorCard.visibility = View.VISIBLE
     }
 
-    private fun configureMediaQualitySegments(value: WeiboPost) {
-        data class BatchGroup(val type: MediaType, val keys: List<String>, val selectedKey: String)
-        val groups = MediaType.entries.mapNotNull { type ->
-            val items = value.media.filter { it.type == type && it.variants.isNotEmpty() }
-            val keys = items.firstOrNull()?.variants
-                ?.map { it.key }
-                ?.filter { key -> items.all { item -> item.variants.any { it.key == key } } }
-                .orEmpty()
-            if (keys.size < 2) return@mapNotNull null
-            val selectedKey = items.mapNotNull { it.selectedVariantKey }
-                .distinct()
-                .singleOrNull()
-                ?.takeIf { it in keys }
-                ?: keys.first()
-            BatchGroup(type, keys, selectedKey)
-        }
-        if (groups.isEmpty()) {
+    private fun configureMediaQualitySegments(value: WeiboPost, focusIndex: Int) {
+        val item = value.media.getOrNull(focusIndex)
+        val variants = item?.variants.orEmpty().distinctBy { it.key }
+        if (item == null || variants.size < 2) {
             mediaQualitySegments.visibility = View.GONE
             mediaQualitySegments.setContent {}
             return
         }
-        val uiGroups = groups.map { group ->
-            WeiChoiceGroup(
-                title = getString(group.type.labelRes),
-                labels = group.keys.map(::mediaVariantLabel),
-                selectedIndex = group.keys.indexOf(group.selectedKey).coerceAtLeast(0),
-            )
-        }
+        val keys = variants.map { it.key }
+        val selectedKey = item.selectedVariantKey?.takeIf { it in keys } ?: keys.first()
+        val uiGroup = WeiChoiceGroup(
+            title = getString(
+                R.string.focused_media_options,
+                focusIndex + 1,
+                getString(item.type.labelRes),
+            ),
+            labels = keys.map(::mediaVariantLabel),
+            selectedIndex = keys.indexOf(selectedKey).coerceAtLeast(0),
+        )
         mediaQualitySegments.visibility = View.VISIBLE
         mediaQualitySegments.setContent {
-            WeiChoiceGroups(uiGroups) { groupIndex, itemIndex ->
-                val group = groups.getOrNull(groupIndex) ?: return@WeiChoiceGroups
-                group.keys.getOrNull(itemIndex)?.let { key ->
-                    selectVariantForBatch(group.type, key)
+            WeiChoiceGroups(listOf(uiGroup)) { groupIndex, itemIndex ->
+                if (groupIndex == 0) {
+                    keys.getOrNull(itemIndex)?.let { key ->
+                        selectVariantForMedia(item.stableId, key)
+                    }
                 }
             }
         }
     }
 
-    private fun selectVariantForBatch(type: MediaType, key: String) {
+    private fun selectVariantForMedia(stableId: String, key: String) {
         val current = post ?: return
         val selectedStableIds = current.media
             .filter { it.url in selectedUrls }
             .mapTo(HashSet()) { it.stableId }
         val updated = current.copy(
             media = current.media.map { item ->
-                if (item.type == type) item.selectVariant(key) else item
+                if (item.stableId == stableId) item.selectVariant(key) else item
             },
         )
         post = updated

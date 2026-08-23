@@ -72,6 +72,7 @@ class WeiboCarouselView @JvmOverloads constructor(
 
     var onSelectionChanged: ((CarouselMediaItem, Boolean) -> Unit)? = null
     var onItemClick: ((CarouselMediaItem) -> Unit)? = null
+    var onFocusChanged: ((CarouselMediaItem, Int) -> Unit)? = null
     var thumbnailBinder: ((android.widget.ImageView, String, String) -> Unit)?
         get() = carouselAdapter.thumbnailBinder
         set(value) {
@@ -149,6 +150,7 @@ class WeiboCarouselView @JvmOverloads constructor(
         currentFocus = 0
         carouselAdapter.submitItems(items)
         rebuildCards()
+        notifyFocusChanged()
         post { applyStableLayout(currentFocus) }
     }
 
@@ -158,6 +160,7 @@ class WeiboCarouselView @JvmOverloads constructor(
         currentFocus = currentFocus.coerceIn(0, (items.size - 1).coerceAtLeast(0))
         carouselAdapter.updateItems(items)
         rebuildCards()
+        notifyFocusChanged()
         post { applyStableLayout(currentFocus) }
     }
 
@@ -451,11 +454,17 @@ class WeiboCarouselView @JvmOverloads constructor(
     }
 
     private fun completeTransition(transition: TransitionGeometry, commit: Boolean) {
+        val previousFocus = currentFocus
         currentFocus = if (commit) transition.targetFocus else transition.startFocus
         dragging = false
         activeTransition = null
         transitionProgress = 0f
         applyStableLayout(currentFocus)
+        if (currentFocus != previousFocus) notifyFocusChanged()
+    }
+
+    private fun notifyFocusChanged() {
+        items.getOrNull(currentFocus)?.let { onFocusChanged?.invoke(it, currentFocus) }
     }
 
     private fun applyTransition(transition: TransitionGeometry, progress: Float) {

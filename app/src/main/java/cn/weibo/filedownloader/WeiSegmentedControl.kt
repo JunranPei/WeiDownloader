@@ -124,13 +124,11 @@ fun WeiChoiceGroups(
     MaterialTheme(colorScheme = currentViewColorScheme()) {
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             groups.forEachIndexed { groupIndex, group ->
-                if (groups.size > 1) {
-                    Text(
-                        text = group.title,
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
+                Text(
+                    text = group.title,
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
                 WeiSingleChoiceSegmentedControl(
                     labels = group.labels,
                     selectedIndex = group.selectedIndex,

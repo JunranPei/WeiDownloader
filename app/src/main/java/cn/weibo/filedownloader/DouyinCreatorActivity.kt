@@ -22,8 +22,9 @@ import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import coil.load
 import coil.transform.CircleCropTransformation
-import com.google.android.material.appbar.MaterialToolbar
 import com.google.android.material.button.MaterialButton
+import com.google.android.material.card.MaterialCardView
+import com.google.android.material.color.MaterialColors
 import com.google.android.material.progressindicator.CircularProgressIndicator
 import java.util.ArrayDeque
 import java.util.concurrent.Executors
@@ -81,7 +82,7 @@ class DouyinCreatorActivity : Activity() {
     }
 
     private fun bindViews() {
-        findViewById<MaterialToolbar>(R.id.creatorToolbar).setNavigationOnClickListener { finish() }
+        findViewById<View>(R.id.creatorBackButton).setOnClickListener { finish() }
         worksList = findViewById(R.id.creatorWorksList)
         state = findViewById(R.id.creatorState)
         stateText = findViewById(R.id.creatorStateText)
@@ -133,6 +134,10 @@ class DouyinCreatorActivity : Activity() {
         if (loading || !hasMore) return
         loading = true
         if (adapter.itemCount == 0) showLoading()
+        if (!usingWebFallback && adapter.itemCount == 0 && DouyinSession.isSignedIn()) {
+            startWebFallback()
+            return
+        }
         if (usingWebFallback) {
             webLoader?.loadMore(::handleWebResult)
                 ?: handleWebResult(Result.failure(IllegalStateException("Creator page is not open")))
@@ -181,6 +186,7 @@ class DouyinCreatorActivity : Activity() {
         adapter.append(page.works)
         cursor = page.nextCursor
         hasMore = page.hasMore && cursorAdvanced
+        Log.d(LOG_TAG, "Creator works accumulated=${adapter.itemCount}, source=${page.works.size}, hasMore=$hasMore")
         when {
             adapter.itemCount > 0 -> state.visibility = View.GONE
             else -> showMessage(R.string.creator_empty, canRetry = false)
@@ -420,14 +426,15 @@ private class CreatorWorksAdapter(
             holder.itemView.context.getString(R.string.creator_video)
         }
         val selected = item.id in selectedIds
-        holder.selection.isSelected = selected
+        renderSelection(holder, selected)
         holder.selection.isEnabled = interactionsEnabled
-        holder.selection.contentDescription = holder.itemView.context.getString(
-            if (selected) R.string.deselect_creator_work else R.string.select_creator_work,
-        )
         holder.selection.setOnClickListener {
             if (!interactionsEnabled) return@setOnClickListener
-            if (!selectedIds.add(item.id)) selectedIds.remove(item.id)
+            val nowSelected = if (selectedIds.add(item.id)) true else {
+                selectedIds.remove(item.id)
+                false
+            }
+            renderSelection(holder, nowSelected)
             holder.bindingAdapterPosition
                 .takeIf { it != RecyclerView.NO_POSITION }
                 ?.let(::notifyItemChanged)
@@ -436,7 +443,25 @@ private class CreatorWorksAdapter(
         holder.itemView.setOnClickListener { if (interactionsEnabled) onClick(item) }
     }
 
+    private fun renderSelection(holder: Holder, selected: Boolean) {
+        holder.selection.isSelected = selected
+        holder.selection.refreshDrawableState()
+        holder.selection.contentDescription = holder.itemView.context.getString(
+            if (selected) R.string.deselect_creator_work else R.string.select_creator_work,
+        )
+        holder.card.strokeWidth = if (selected) {
+            (2 * holder.itemView.resources.displayMetrics.density).toInt()
+        } else {
+            0
+        }
+        holder.card.strokeColor = MaterialColors.getColor(
+            holder.card,
+            com.google.android.material.R.attr.colorPrimary,
+        )
+    }
+
     class Holder(view: View) : RecyclerView.ViewHolder(view) {
+        val card: MaterialCardView = view.findViewById(R.id.creatorWorkCard)
         val cover: ImageView = view.findViewById(R.id.creatorWorkCover)
         val title: TextView = view.findViewById(R.id.creatorWorkTitle)
         val type: TextView = view.findViewById(R.id.creatorWorkType)
