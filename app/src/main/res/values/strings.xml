@@ -42,6 +42,8 @@
     <string name="creator_gallery_count">图集 · %1$d 张</string>
     <string name="creator_gallery">图集</string>
     <string name="creator_video">视频</string>
+    <string name="creator_downloaded_count">%1$d/%2$s</string>
+    <string name="creator_downloaded_count_description">已下载 %1$d/%2$s 个文件</string>
     <string name="creator_untitled_work">未命名作品</string>
     <string name="select_creator_work">选择此作品以快速下载</string>
     <string name="deselect_creator_work">取消选择此作品</string>
@@ -123,11 +125,10 @@
     <string name="recorded">已记录</string>
     <string name="pending_download">待下载</string>
     <string name="select_at_least_one">请至少选择一个文件。</string>
-    <string name="download_enqueued_format">已交给系统下载器：%1$d 个文件</string>
+    <string name="download_enqueued_format">已加入下载：%1$d 个文件</string>
     <string name="download_started_format">已开始下载 %1$d 个文件</string>
     <string name="create_download_failed">无法创建下载任务</string>
     <string name="custom_download_failed">下载到所选文件夹失败</string>
-
     <string name="client_login_required">请先在应用内完成微博登录。</string>
     <string name="default_author">微博用户</string>
     <string name="no_media">没有发现可下载的图片、Live 图、视频或音频；内容可能受权限或平台限制。</string>

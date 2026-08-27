@@ -10,4 +10,6 @@ data class CarouselMediaItem(
     val selected: Boolean = false,
     val selectable: Boolean = true,
     val downloaded: Boolean = false,
+    /** null = idle, -1 = downloading with unknown size, 0..100 = determinate progress. */
+    val downloadProgress: Int? = null,
 )

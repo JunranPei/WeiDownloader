@@ -2,4 +2,6 @@
     <string name="wc_media_thumbnail">Media preview</string>
     <string name="wc_select_media">Select media</string>
     <string name="wc_deselect_media">Deselect media</string>
+    <string name="wc_downloading_media">Downloading media</string>
+    <string name="wc_downloading_media_progress">Downloading media: %1$d%%</string>
 </resources>

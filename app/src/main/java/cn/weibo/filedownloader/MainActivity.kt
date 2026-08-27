@@ -71,8 +71,16 @@ class MainActivity : ComponentActivity() {
     private var appliedThemeMode = ThemeController.MODE_SYSTEM
     private var douyinClient: DouyinClient? = null
     private var focusedMediaIndex = 0
+    private var renderedDownloadSuccessVersion = -1L
     private val selectedUrls = LinkedHashSet<String>()
     private var lastClipboardUrl = ""
+    private val downloadProgressRefresh = object : Runnable {
+        override fun run() {
+            if (!::mediaCarousel.isInitialized) return
+            refreshMediaCardDownloadProgress()
+            mediaCarousel.postDelayed(this, DOWNLOAD_PROGRESS_REFRESH_INTERVAL_MS)
+        }
+    }
     private val clipboardListener = ClipboardManager.OnPrimaryClipChangedListener {
         if (::linkInput.isInitialized) linkInput.post { autoFillFromClipboard() }
     }
@@ -161,6 +169,8 @@ class MainActivity : ComponentActivity() {
         (getSystemService(CLIPBOARD_SERVICE) as ClipboardManager).addPrimaryClipChangedListener(clipboardListener)
         scheduleClipboardRead()
         refreshSession()
+        mediaCarousel.removeCallbacks(downloadProgressRefresh)
+        mediaCarousel.post(downloadProgressRefresh)
     }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
@@ -170,6 +180,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onPause() {
         if (::linkInput.isInitialized) linkInput.removeCallbacks(clipboardRead)
+        if (::mediaCarousel.isInitialized) mediaCarousel.removeCallbacks(downloadProgressRefresh)
         (getSystemService(CLIPBOARD_SERVICE) as ClipboardManager).removePrimaryClipChangedListener(clipboardListener)
         super.onPause()
     }
@@ -512,8 +523,11 @@ class MainActivity : ComponentActivity() {
 
     private fun showMedia(value: WeiboPost, resetCarousel: Boolean = true) {
         val history = DownloadHistory(this)
+        val statusStore = DownloadStatusStore(this)
+        renderedDownloadSuccessVersion = statusStore.successVersion()
         val carouselItems = value.media.mapIndexed { index, item ->
             val recorded = history.contains(item)
+            val activeDownload = statusStore.activeMediaDownload(item.stableId)
             val qualityLabel = mediaTechnicalLabel(item)
             /* card content is supplied by the reusable carousel
             row.findViewById<TextView>(R.id.mediaTitle).text = "${index + 1}. ${getString(item.type.labelRes)} · ${getString(MediaQuality.labelRes(item.quality))}"
@@ -551,8 +565,10 @@ class MainActivity : ComponentActivity() {
                 title = "${index + 1}. ${getString(item.type.labelRes)} · $qualityLabel",
                 subtitle = item.suggestedFileName(),
                 selected = selectedUrls.contains(item.url),
-                selectable = true,
+                selectable = activeDownload == null,
                 downloaded = recorded,
+                downloadProgress = activeDownload?.percent?.takeIf { activeDownload.downloadedBytes > 0L }
+                    ?: activeDownload?.let { INDETERMINATE_DOWNLOAD_PROGRESS },
             )
         }
         if (resetCarousel) {
@@ -564,6 +580,24 @@ class MainActivity : ComponentActivity() {
         bindCreatorPresentation(value.creator)
         configureMediaQualitySegments(value, focusedMediaIndex)
         updateSelectionUi()
+    }
+
+    private fun refreshMediaCardDownloadProgress() {
+        val current = post ?: return
+        val statusStore = DownloadStatusStore(this)
+        if (statusStore.successVersion() != renderedDownloadSuccessVersion) {
+            showMedia(current, resetCarousel = false)
+            return
+        }
+        mediaCarousel.updateDownloadProgress(
+            current.media.associate { item ->
+                val activeDownload = statusStore.activeMediaDownload(item.stableId)
+                item.url to (
+                    activeDownload?.percent?.takeIf { activeDownload.downloadedBytes > 0L }
+                        ?: activeDownload?.let { INDETERMINATE_DOWNLOAD_PROGRESS }
+                    )
+            },
+        )
     }
 
     private fun bindCreatorPresentation(creator: CreatorProfile?) {
@@ -728,6 +762,7 @@ class MainActivity : ComponentActivity() {
                 if (platform == Platform.WEIBO) sessionCookie else "",
                 platform,
             ).enqueueSelected(current, chosen, destinationTreeUri)
+            if (result.queued == 0) return toast(getString(R.string.create_download_failed))
             selectedUrls.removeAll(chosen.map { it.url }.toSet())
             showMedia(current, resetCarousel = false)
             summaryText.text = getString(R.string.download_enqueued_format, result.queued)
@@ -790,5 +825,7 @@ class MainActivity : ComponentActivity() {
         const val ACTION_OPEN_DOUYIN_WORK = "cn.weibo.filedownloader.action.OPEN_DOUYIN_WORK"
         const val EXTRA_DOUYIN_WORK_URL = "douyin_work_url"
         private const val STATE_PLATFORM = "state_platform"
+        private const val DOWNLOAD_PROGRESS_REFRESH_INTERVAL_MS = 500L
+        private const val INDETERMINATE_DOWNLOAD_PROGRESS = -1
     }
 }

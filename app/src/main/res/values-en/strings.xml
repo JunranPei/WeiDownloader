@@ -42,6 +42,8 @@
     <string name="creator_gallery_count">Gallery · %1$d images</string>
     <string name="creator_gallery">Gallery</string>
     <string name="creator_video">Video</string>
+    <string name="creator_downloaded_count">%1$d/%2$s</string>
+    <string name="creator_downloaded_count_description">%1$d/%2$s files downloaded</string>
     <string name="creator_untitled_work">Untitled post</string>
     <string name="select_creator_work">Select this post for quick download</string>
     <string name="deselect_creator_work">Deselect this post</string>
@@ -123,11 +125,10 @@
     <string name="recorded">Downloaded</string>
     <string name="pending_download">Ready</string>
     <string name="select_at_least_one">Select at least one file.</string>
-    <string name="download_enqueued_format">Queued %1$d files.</string>
+    <string name="download_enqueued_format">Added %1$d files to downloads.</string>
     <string name="download_started_format">Downloading %1$d files</string>
     <string name="create_download_failed">Could not create the download task</string>
     <string name="custom_download_failed">Could not download to the selected folder</string>
-
     <string name="client_login_required">Sign in to Weibo in the app first.</string>
     <string name="default_author">Weibo user</string>
     <string name="no_media">No downloadable images, Live Photos, videos, or audio were found. The post may be restricted.</string>

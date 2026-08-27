@@ -5,7 +5,6 @@ import android.graphics.drawable.GradientDrawable
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
-import android.widget.ImageButton
 import android.widget.TextView
 import androidx.core.content.ContextCompat
 import androidx.recyclerview.widget.RecyclerView
@@ -79,7 +78,9 @@ internal class CarouselMediaAdapter(
         private val thumbnail = itemView.findViewById<android.widget.ImageView>(cn.weibo.carousel.R.id.carouselThumbnail)
         private val title = itemView.findViewById<TextView>(cn.weibo.carousel.R.id.carouselTitle)
         private val subtitle = itemView.findViewById<TextView>(cn.weibo.carousel.R.id.carouselSubtitle)
-        private val selection = itemView.findViewById<ImageButton>(cn.weibo.carousel.R.id.carouselSelection)
+        private val selection = itemView.findViewById<CarouselSelectionProgressView>(
+            cn.weibo.carousel.R.id.carouselSelection,
+        )
         private var boundItem: CarouselMediaItem? = null
 
         init {
@@ -90,7 +91,9 @@ internal class CarouselMediaAdapter(
             // reusable view calls setVisibleWidth() while it interpolates its
             // fixed keylines, so the circle cannot protrude from a narrow card.
             root.setOnMaskChangedListener { mask ->
-                if (root.width == 0) selection.visibility = View.INVISIBLE
+                if (root.width == 0) {
+                    selection.visibility = View.INVISIBLE
+                }
             }
             itemView.setOnClickListener {
                 val item = boundItem ?: return@setOnClickListener
@@ -107,12 +110,7 @@ internal class CarouselMediaAdapter(
             boundItem = item
             title.text = item.title
             subtitle.text = item.subtitle
-            selection.isEnabled = item.selectable
-            selection.contentDescription = context.getString(
-                if (item.selected) cn.weibo.carousel.R.string.wc_deselect_media
-                else cn.weibo.carousel.R.string.wc_select_media,
-            )
-            renderSelection(item)
+            updateDownloadState(item)
             setVisibleWidth(root.width)
             if (thumbnailBinder != null) {
                 thumbnailBinder?.invoke(thumbnail, item.imageUrl, item.fallbackImageUrl)
@@ -122,6 +120,24 @@ internal class CarouselMediaAdapter(
             }
         }
 
+        fun updateDownloadState(item: CarouselMediaItem) {
+            boundItem = item
+            val progress = item.downloadProgress
+            selection.isEnabled = item.selectable && progress == null
+            selection.contentDescription = when {
+                progress == null -> context.getString(
+                    if (item.selected) cn.weibo.carousel.R.string.wc_deselect_media
+                    else cn.weibo.carousel.R.string.wc_select_media,
+                )
+                progress >= 0 -> context.getString(
+                    cn.weibo.carousel.R.string.wc_downloading_media_progress,
+                    progress,
+                )
+                else -> context.getString(cn.weibo.carousel.R.string.wc_downloading_media)
+            }
+            renderSelection(item)
+        }
+
         private fun renderSelection(item: CarouselMediaItem) {
             val primary = MaterialColors.getColor(selection, R.attr.colorPrimary)
             val onPrimary = MaterialColors.getColor(selection, R.attr.colorOnPrimary)
@@ -129,20 +145,27 @@ internal class CarouselMediaAdapter(
             val surfaceContainerLow = MaterialColors.getColor(selection, R.attr.colorSurfaceContainerLow)
             val surfaceContainer = MaterialColors.getColor(selection, R.attr.colorSurfaceContainerHigh)
             val onSurfaceVariant = MaterialColors.getColor(selection, R.attr.colorOnSurfaceVariant)
+            val downloading = item.downloadProgress != null
+            val waitingForSize = item.downloadProgress?.let { it < 0 } == true
             val background = GradientDrawable().apply {
                 shape = GradientDrawable.OVAL
                 when {
+                    waitingForSize -> setColor(primary)
+                    downloading -> setColor(surfaceContainerLow)
                     item.selected -> setColor(primary)
                     item.downloaded -> setColor(surfaceContainer)
                     else -> setColor(surfaceContainerLow)
                 }
             }
-            if (!item.downloaded && !item.selected) background.setStroke(dp(1f), outlineVariant)
-            selection.background = background
+            if (!downloading && !item.downloaded && !item.selected) background.setStroke(dp(1f), outlineVariant)
+            selection.background = if (downloading && !waitingForSize) null else background
+            selection.downloadProgress = item.downloadProgress?.takeIf { it >= 0 }
+            selection.progressColor = primary
+            selection.progressBaseColor = surfaceContainerLow
             selection.setImageDrawable(
-                if (item.selected || item.downloaded) {
+                if (waitingForSize || (!downloading && (item.selected || item.downloaded))) {
                     ContextCompat.getDrawable(context, cn.weibo.carousel.R.drawable.wc_check)?.mutate()?.also {
-                        it.setTint(if (item.selected) onPrimary else onSurfaceVariant)
+                        it.setTint(if (waitingForSize || item.selected) onPrimary else onSurfaceVariant)
                     }
                 } else null,
             )

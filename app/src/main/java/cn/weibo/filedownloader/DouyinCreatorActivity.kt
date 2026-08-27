@@ -90,7 +90,12 @@ class DouyinCreatorActivity : Activity() {
         retry = findViewById(R.id.creatorRetry)
         quickDownloadBar = findViewById(R.id.creatorDownloadBar)
         quickDownloadButton = findViewById(R.id.creatorQuickDownload)
-        adapter = CreatorWorksAdapter(::openWork, ::updateQuickDownloadSelection)
+        adapter = CreatorWorksAdapter(
+            ::openWork,
+            ::updateQuickDownloadSelection,
+        ) { work ->
+            DownloadHistory(this).downloadedCount(work.id, work.mediaCount)
+        }
         val columns = if (resources.configuration.screenWidthDp >= 600) 3 else 2
         val layoutManager = GridLayoutManager(this, columns)
         worksList.layoutManager = layoutManager
@@ -373,6 +378,7 @@ class DouyinCreatorActivity : Activity() {
 private class CreatorWorksAdapter(
     private val onClick: (DouyinCreatorWork) -> Unit,
     private val onSelectionChanged: (Int) -> Unit,
+    private val downloadedCount: (DouyinCreatorWork) -> Int,
 ) : RecyclerView.Adapter<CreatorWorksAdapter.Holder>() {
     private val items = mutableListOf<DouyinCreatorWork>()
     private val ids = hashSetOf<String>()
@@ -425,6 +431,18 @@ private class CreatorWorksAdapter(
         } else {
             holder.itemView.context.getString(R.string.creator_video)
         }
+        val downloaded = downloadedCount(item)
+        val total = item.mediaCount.takeIf { it > 0 }?.toString() ?: "?"
+        holder.downloaded.text = holder.itemView.context.getString(
+            R.string.creator_downloaded_count,
+            downloaded,
+            total,
+        )
+        holder.downloaded.contentDescription = holder.itemView.context.getString(
+            R.string.creator_downloaded_count_description,
+            downloaded,
+            total,
+        )
         val selected = item.id in selectedIds
         renderSelection(holder, selected)
         holder.selection.isEnabled = interactionsEnabled
@@ -465,6 +483,7 @@ private class CreatorWorksAdapter(
         val cover: ImageView = view.findViewById(R.id.creatorWorkCover)
         val title: TextView = view.findViewById(R.id.creatorWorkTitle)
         val type: TextView = view.findViewById(R.id.creatorWorkType)
+        val downloaded: TextView = view.findViewById(R.id.creatorWorkDownloaded)
         val selection: ImageButton = view.findViewById(R.id.creatorWorkSelected)
     }
 }

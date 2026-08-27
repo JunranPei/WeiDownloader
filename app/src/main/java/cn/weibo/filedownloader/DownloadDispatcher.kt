@@ -1,14 +1,10 @@
 package cn.weibo.filedownloader
 
-import android.app.DownloadManager
 import android.content.Context
-import android.net.Uri
-import android.os.Environment
-import androidx.work.Constraints
 import androidx.work.Data
-import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
+import java.util.UUID
 
 class DownloadDispatcher(
     private val context: Context,
@@ -24,59 +20,53 @@ class DownloadDispatcher(
         enqueue(post, mediaItems, destinationTreeUri)
 
     private fun enqueue(post: WeiboPost, mediaItems: List<MediaItem>, destinationTreeUri: String?): Result {
-        val manager = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
         val folderName = DownloadOrganization.folderName(context, post.author, post.id)
-        val defaultFolder = folderName
-        val history = DownloadHistory(context)
         val includeLiveCover = context
             .getSharedPreferences("downloader_settings", Context.MODE_PRIVATE)
             .getBoolean("live_cover", false)
-        var queued = 0
-        mediaItems.forEach { media ->
-            val downloads = DownloadMediaPlanner.expand(media, includeLiveCover)
-            downloads.forEach { download ->
-                if (destinationTreeUri.isNullOrBlank()) {
-                    val request = DownloadManager.Request(Uri.parse(download.url))
-                        .setTitle(download.suggestedFileName())
-                        .setDescription("${context.getString(download.type.labelRes)} · ${context.getString(MediaQuality.labelRes(download.quality))}")
-                        .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
-                        .setAllowedOverMetered(true)
-                        .setAllowedOverRoaming(false)
-                        .addRequestHeader("User-Agent", USER_AGENT)
-                        .addRequestHeader("Referer", platform.referer)
-                        .addRequestHeader("Cookie", cookie)
-                        .setDestinationInExternalPublicDir(
-                            Environment.DIRECTORY_DOWNLOADS,
-                            "$defaultFolder/${download.suggestedFileName()}",
-                        )
-                    manager.enqueue(request)
-                } else {
-                    val input = Data.Builder()
-                        .putString(SafDownloadWorker.KEY_URL, download.url)
-                        .putString(SafDownloadWorker.KEY_COOKIE, cookie)
-                        .putString(SafDownloadWorker.KEY_TREE_URI, destinationTreeUri)
-                        .putString(SafDownloadWorker.KEY_FOLDER, folderName)
-                        .putString(SafDownloadWorker.KEY_FILE_NAME, download.suggestedFileName())
-                        .putString(SafDownloadWorker.KEY_MEDIA_TYPE, download.type.name)
-                        .putString(SafDownloadWorker.KEY_REFERER, platform.referer)
-                        .build()
-                    val request = OneTimeWorkRequestBuilder<SafDownloadWorker>()
-                        .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
-                        .setInputData(input)
-                        .build()
-                    WorkManager.getInstance(context).enqueue(request)
-                }
-                history.remember(download)
-                queued++
+        val downloads = mediaItems.flatMap { media ->
+            DownloadMediaPlanner.expand(media, includeLiveCover).mapIndexed { index, download ->
+                PlannedDownload(download, media.stableId.takeIf { index == 0 }.orEmpty())
             }
         }
-        history.save()
+        if (downloads.isEmpty()) return Result(0)
+        val statusStore = DownloadStatusStore(context)
+        var queued = 0
+        downloads.forEach { planned ->
+            val download = planned.media
+            var registeredWorkId: String? = null
+            try {
+                val workId = UUID.randomUUID()
+                val input = Data.Builder()
+                    .putString(SafDownloadWorker.KEY_URL, download.url)
+                    .putString(SafDownloadWorker.KEY_COOKIE, cookie)
+                    .putString(SafDownloadWorker.KEY_TREE_URI, destinationTreeUri)
+                    .putString(SafDownloadWorker.KEY_FOLDER, folderName)
+                    .putString(SafDownloadWorker.KEY_FILE_NAME, download.suggestedFileName())
+                    .putString(SafDownloadWorker.KEY_MEDIA_TYPE, download.type.name)
+                    .putString(SafDownloadWorker.KEY_REFERER, platform.referer)
+                    .putString(SafDownloadWorker.KEY_STATUS_WORK_ID, workId.toString())
+                    .build()
+                val request = OneTimeWorkRequestBuilder<SafDownloadWorker>()
+                    .setId(workId)
+                    .setInputData(input)
+                    .build()
+                statusStore.registerWorkerTask(
+                    workId.toString(),
+                    DownloadHistoryKeys.stable(download),
+                    planned.mediaIdentity,
+                )
+                registeredWorkId = workId.toString()
+                WorkManager.getInstance(context).enqueue(request)
+                queued++
+            } catch (_: Exception) {
+                registeredWorkId?.let(statusStore::failWorker)
+            }
+        }
         return Result(queued)
     }
 
-    private companion object {
-        const val USER_AGENT = "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/126 Mobile Safari/537.36"
-    }
+    private data class PlannedDownload(val media: MediaItem, val mediaIdentity: String)
 
     private val Platform.referer: String
         get() = when (this) {

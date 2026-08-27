@@ -203,7 +203,7 @@ internal class DouyinCreatorWebLoader(
                             .trim(),
                         coverUrl = cover,
                         sourceUrl = "https://www.douyin.com/$route/$id",
-                        mediaCount = if (route == "note") 0 else 1,
+                        mediaCount = item.optInt("mediaCount", if (route == "note") 0 else 1),
                         isGallery = route == "note",
                     ),
                 )
@@ -296,7 +296,8 @@ internal class DouyinCreatorWebLoader(
                 route: isGallery ? 'note' : 'video',
                 id,
                 cover,
-                title: String(item?.desc || item?.title || '').trim()
+                title: String(item?.desc || item?.title || '').trim(),
+                mediaCount: isGallery ? images.length : 1
               });
             }
             window.__weiCreatorCursor = Number(data?.max_cursor || data?.cursor || 0);

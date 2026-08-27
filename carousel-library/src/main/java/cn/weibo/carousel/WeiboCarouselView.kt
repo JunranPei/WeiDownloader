@@ -166,6 +166,17 @@ class WeiboCarouselView @JvmOverloads constructor(
 
     fun selectedIds(): Set<String> = items.filter { it.selected }.mapTo(LinkedHashSet()) { it.id }
 
+    /** Updates only the selection-circle indicators without rebuilding media cards. */
+    fun updateDownloadProgress(values: Map<String, Int?>) {
+        val next = items.map { item -> item.copy(downloadProgress = values[item.id]) }
+        if (next == items) return
+        items = next
+        carouselAdapter.updateItems(items)
+        holders.forEachIndexed { index, holder ->
+            items.getOrNull(index)?.let(holder::updateDownloadState)
+        }
+    }
+
     private fun rebuildCards() {
         holders.clear()
         removeAllViews()

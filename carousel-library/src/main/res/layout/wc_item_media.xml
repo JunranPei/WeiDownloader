@@ -55,7 +55,7 @@
                 android:textColor="#E8FFFFFF" />
         </LinearLayout>
 
-        <ImageButton
+        <cn.weibo.carousel.CarouselSelectionProgressView
             android:id="@+id/carouselSelection"
             android:layout_width="40dp"
             android:layout_height="40dp"
