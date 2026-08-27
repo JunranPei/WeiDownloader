@@ -129,6 +129,13 @@
     <string name="download_started_format">Downloading %1$d files</string>
     <string name="create_download_failed">Could not create the download task</string>
     <string name="custom_download_failed">Could not download to the selected folder</string>
+    <string name="download_tasks_title">Downloads</string>
+    <string name="no_active_downloads">No active downloads</string>
+    <string name="no_active_downloads_description">Works appear here after you start downloading media</string>
+    <string name="download_work_thumbnail">Work thumbnail</string>
+    <string name="download_work_fallback_title">A post by %1$s</string>
+    <string name="download_work_preparing">%1$d/%2$d complete · Preparing</string>
+    <string name="download_work_progress">%1$d/%2$d complete · %3$d%%</string>
     <string name="client_login_required">Sign in to Weibo in the app first.</string>
     <string name="default_author">Weibo user</string>
     <string name="no_media">No downloadable images, Live Photos, videos, or audio were found. The post may be restricted.</string>

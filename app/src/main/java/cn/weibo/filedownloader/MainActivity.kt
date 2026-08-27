@@ -13,6 +13,7 @@ import android.view.KeyEvent
 import android.view.View
 import android.view.inputmethod.EditorInfo
 import android.widget.EditText
+import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.TextView
 import android.widget.Toast
@@ -23,6 +24,8 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.widget.doAfterTextChanged
+import androidx.recyclerview.widget.RecyclerView
+import androidx.viewpager2.widget.ViewPager2
 import androidx.appcompat.content.res.AppCompatResources
 import androidx.core.content.ContextCompat
 import android.content.res.ColorStateList
@@ -47,6 +50,9 @@ class MainActivity : ComponentActivity() {
             .build()
     }
     private lateinit var preferences: SharedPreferences
+    private lateinit var mainPage: View
+    private lateinit var mainPager: ViewPager2
+    private lateinit var downloadTasksPage: DownloadTasksPageController
     private lateinit var pasteButton: MaterialButton
     private lateinit var parseButton: MaterialButton
     private lateinit var selectAllButton: MaterialButton
@@ -61,6 +67,7 @@ class MainActivity : ComponentActivity() {
     private lateinit var creatorName: TextView
     private lateinit var progress: LinearProgressIndicator
     private lateinit var contentScroll: View
+    private lateinit var toolbar: View
     private lateinit var emptyTopSpacer: View
     private lateinit var bottomBar: View
     private lateinit var platformPrefix: TextView
@@ -93,8 +100,20 @@ class MainActivity : ComponentActivity() {
         appliedThemeMode = storedThemeMode()
         platform = Platform.entries.firstOrNull { it.key == savedInstanceState?.getString(STATE_PLATFORM) }
             ?: Platform.WEIBO
-        setContentView(R.layout.activity_main)
+        setContentView(R.layout.activity_main_pager)
+        mainPager = findViewById(R.id.mainPager)
+        mainPage = layoutInflater.inflate(R.layout.activity_main, mainPager, false)
+        val downloadsPage = layoutInflater.inflate(R.layout.activity_download_tasks, mainPager, false)
+        mainPager.adapter = StaticPagesAdapter(listOf(mainPage, downloadsPage))
+        mainPager.offscreenPageLimit = 1
+        mainPager.setCurrentItem(savedInstanceState?.getInt(STATE_PAGE) ?: PAGE_MAIN, false)
         bindViews()
+        downloadTasksPage = DownloadTasksPageController(
+            this,
+            downloadsPage,
+            ::openDownloadWork,
+            ::updateDownloadPageAvailability,
+        )
         fillFromSharedIntent(intent)
         applySystemInsets()
         refreshSession()
@@ -171,6 +190,7 @@ class MainActivity : ComponentActivity() {
         refreshSession()
         mediaCarousel.removeCallbacks(downloadProgressRefresh)
         mediaCarousel.post(downloadProgressRefresh)
+        downloadTasksPage.start()
     }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
@@ -181,6 +201,7 @@ class MainActivity : ComponentActivity() {
     override fun onPause() {
         if (::linkInput.isInitialized) linkInput.removeCallbacks(clipboardRead)
         if (::mediaCarousel.isInitialized) mediaCarousel.removeCallbacks(downloadProgressRefresh)
+        if (::downloadTasksPage.isInitialized) downloadTasksPage.stop()
         (getSystemService(CLIPBOARD_SERVICE) as ClipboardManager).removePrimaryClipChangedListener(clipboardListener)
         super.onPause()
     }
@@ -199,32 +220,34 @@ class MainActivity : ComponentActivity() {
 
     override fun onSaveInstanceState(outState: Bundle) {
         outState.putString(STATE_PLATFORM, platform.key)
+        outState.putInt(STATE_PAGE, mainPager.currentItem)
         super.onSaveInstanceState(outState)
     }
 
     private fun bindViews() {
-        pasteButton = findViewById(R.id.pasteButton)
-        parseButton = findViewById(R.id.parseButton)
-        selectAllButton = findViewById(R.id.selectAllButton)
-        downloadButton = findViewById(R.id.downloadButton)
-        linkInput = findViewById(R.id.linkInput)
-        summaryText = findViewById(R.id.summaryText)
-        mediaHeader = findViewById(R.id.mediaHeader)
-        mediaCarousel = findViewById(R.id.mediaCarousel)
-        mediaQualitySegments = findViewById(R.id.mediaQualitySegments)
+        toolbar = mainPage.findViewById(R.id.toolbar)
+        pasteButton = mainPage.findViewById(R.id.pasteButton)
+        parseButton = mainPage.findViewById(R.id.parseButton)
+        selectAllButton = mainPage.findViewById(R.id.selectAllButton)
+        downloadButton = mainPage.findViewById(R.id.downloadButton)
+        linkInput = mainPage.findViewById(R.id.linkInput)
+        summaryText = mainPage.findViewById(R.id.summaryText)
+        mediaHeader = mainPage.findViewById(R.id.mediaHeader)
+        mediaCarousel = mainPage.findViewById(R.id.mediaCarousel)
+        mediaQualitySegments = mainPage.findViewById(R.id.mediaQualitySegments)
         mediaQualitySegments.setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed)
-        creatorCard = findViewById(R.id.creatorCard)
-        creatorAvatar = findViewById(R.id.creatorAvatar)
-        creatorName = findViewById(R.id.creatorName)
-        contentScroll = findViewById(R.id.contentScroll)
-        emptyTopSpacer = findViewById(R.id.emptyTopSpacer)
-        bottomBar = findViewById(R.id.bottomBar)
-        platformPrefix = findViewById(R.id.platformPrefix)
-        brandSwitcher = findViewById(R.id.brandSwitcher)
+        creatorCard = mainPage.findViewById(R.id.creatorCard)
+        creatorAvatar = mainPage.findViewById(R.id.creatorAvatar)
+        creatorName = mainPage.findViewById(R.id.creatorName)
+        contentScroll = mainPage.findViewById(R.id.contentScroll)
+        emptyTopSpacer = mainPage.findViewById(R.id.emptyTopSpacer)
+        bottomBar = mainPage.findViewById(R.id.bottomBar)
+        platformPrefix = mainPage.findViewById(R.id.platformPrefix)
+        brandSwitcher = mainPage.findViewById(R.id.brandSwitcher)
         brandSwitcher.setOnClickListener {
             switchPlatform(if (platform == Platform.WEIBO) Platform.DOUYIN else Platform.WEIBO)
         }
-        installPlatformSwipe(findViewById(R.id.toolbar))
+        installPlatformSwipe(toolbar)
         installPlatformSwipe(brandSwitcher)
         updatePlatformUi()
         contentScroll.addOnLayoutChangeListener { _, left, top, right, bottom, oldLeft, oldTop, oldRight, oldBottom ->
@@ -258,8 +281,8 @@ class MainActivity : ComponentActivity() {
                 post?.let { showMedia(it, resetCarousel = false) }
             }
         }
-        progress = findViewById(R.id.progress)
-        findViewById<View>(R.id.settingsButton).setOnClickListener {
+        progress = mainPage.findViewById(R.id.progress)
+        mainPage.findViewById<View>(R.id.settingsButton).setOnClickListener {
             startActivity(Intent(this, SettingsActivity::class.java).putExtra(SettingsActivity.EXTRA_PLATFORM, platform.key))
         }
         pasteButton.setOnClickListener { pasteFromClipboard() }
@@ -274,17 +297,23 @@ class MainActivity : ComponentActivity() {
         view.setOnTouchListener { _, event ->
             when (event.actionMasked) {
                 android.view.MotionEvent.ACTION_DOWN -> {
+                    view.parent?.requestDisallowInterceptTouchEvent(true)
                     downX = event.x
                     downY = event.y
                     false
                 }
                 android.view.MotionEvent.ACTION_UP -> {
+                    view.parent?.requestDisallowInterceptTouchEvent(false)
                     val dx = event.x - downX
                     val dy = event.y - downY
                     if (kotlin.math.abs(dx) > dpInt(56) && kotlin.math.abs(dx) > kotlin.math.abs(dy) * 1.25f) {
                         switchPlatform(if (dx < 0) Platform.DOUYIN else Platform.WEIBO)
                         true
                     } else false
+                }
+                android.view.MotionEvent.ACTION_CANCEL -> {
+                    view.parent?.requestDisallowInterceptTouchEvent(false)
+                    false
                 }
                 else -> false
             }
@@ -322,7 +351,7 @@ class MainActivity : ComponentActivity() {
         val actionColor = ContextCompat.getColor(this, platform.actionColor)
         val onActionColor = ContextCompat.getColor(this, platform.onActionColor)
         platformPrefix.text = platform.shortName
-        val downloaderTitle = findViewById<TextView>(R.id.downloaderTitle)
+        val downloaderTitle = mainPage.findViewById<TextView>(R.id.downloaderTitle)
         downloaderTitle.text = getString(R.string.brand_downloader)
         if (platform == Platform.DOUYIN) {
             val night = resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK == Configuration.UI_MODE_NIGHT_YES
@@ -398,6 +427,7 @@ class MainActivity : ComponentActivity() {
         if (openCreatorWork) {
             intent.action = Intent.ACTION_MAIN
             intent.removeExtra(EXTRA_DOUYIN_WORK_URL)
+            mainPager.setCurrentItem(PAGE_MAIN, false)
             linkInput.post { if (linkInput.text?.toString() == url) parsePost() }
         }
     }
@@ -502,7 +532,10 @@ class MainActivity : ComponentActivity() {
         post = loaded
         selectedUrls.clear()
         val history = DownloadHistory(this)
-        selectedUrls += loaded.media.filterNot { history.contains(it) }.map { it.url }
+        val statusStore = DownloadStatusStore(this)
+        selectedUrls += loaded.media.filter {
+            !history.contains(it) && statusStore.activeMediaDownload(it.stableId) == null
+        }.map { it.url }
         showMedia(loaded)
         val available = selectedUrls.size
         val summary = if (platform == Platform.DOUYIN && loaded.creator?.id?.isNotBlank() == true) {
@@ -511,6 +544,39 @@ class MainActivity : ComponentActivity() {
             getString(R.string.identified_format, loaded.media.size, available, loaded.author)
         }
         busy(false, summary)
+    }
+
+    private fun openDownloadWork(work: ActiveDownloadWork) {
+        val url = work.sourceUrl
+        if (url.isBlank()) return
+        douyinClient?.close()
+        douyinClient = null
+        platform = work.platform
+        updatePlatformUi()
+        lastClipboardUrl = ""
+        linkInput.setText(url)
+        linkInput.setSelection(url.length)
+        val cached = ActiveDownloadPostCache.get(work.key)
+        if (cached != null) {
+            handleLoadedPost(cached)
+        } else {
+            post = null
+            selectedUrls.clear()
+            clearMediaPresentation()
+            updateSelectionUi()
+            summaryText.visibility = View.GONE
+        }
+        mainPager.setCurrentItem(PAGE_MAIN, true)
+        if (cached == null) {
+            linkInput.post { if (linkInput.text?.toString() == url) parsePost() }
+        }
+    }
+
+    private fun updateDownloadPageAvailability(available: Boolean) {
+        if (!available && mainPager.currentItem != PAGE_MAIN) {
+            mainPager.setCurrentItem(PAGE_MAIN, true)
+        }
+        mainPager.post { mainPager.isUserInputEnabled = available }
     }
 
     private fun handleReadFailure(error: Throwable) {
@@ -784,10 +850,9 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun applySystemInsets() {
-        val root = findViewById<View>(R.id.rootLayout)
-        val toolbar = findViewById<View>(R.id.toolbar)
-        val scroll = findViewById<View>(R.id.contentScroll)
-        val bottomBar = findViewById<View>(R.id.bottomBar)
+        val root = mainPage.findViewById<View>(R.id.rootLayout)
+        val scroll = mainPage.findViewById<View>(R.id.contentScroll)
+        val bottomBar = mainPage.findViewById<View>(R.id.bottomBar)
         val toolbarPadding = intArrayOf(toolbar.paddingLeft, toolbar.paddingTop, toolbar.paddingRight, toolbar.paddingBottom)
         val scrollPadding = intArrayOf(scroll.paddingLeft, scroll.paddingTop, scroll.paddingRight, scroll.paddingBottom)
         val bottomPadding = intArrayOf(bottomBar.paddingLeft, bottomBar.paddingTop, bottomBar.paddingRight, bottomBar.paddingBottom)
@@ -825,7 +890,42 @@ class MainActivity : ComponentActivity() {
         const val ACTION_OPEN_DOUYIN_WORK = "cn.weibo.filedownloader.action.OPEN_DOUYIN_WORK"
         const val EXTRA_DOUYIN_WORK_URL = "douyin_work_url"
         private const val STATE_PLATFORM = "state_platform"
+        private const val STATE_PAGE = "state_page"
+        private const val PAGE_MAIN = 0
         private const val DOWNLOAD_PROGRESS_REFRESH_INTERVAL_MS = 500L
         private const val INDETERMINATE_DOWNLOAD_PROGRESS = -1
     }
+}
+
+private class StaticPagesAdapter(
+    private val pages: List<View>,
+) : RecyclerView.Adapter<StaticPagesAdapter.Holder>() {
+    override fun getItemCount(): Int = pages.size
+
+    override fun getItemViewType(position: Int): Int = position
+
+    override fun onCreateViewHolder(parent: android.view.ViewGroup, viewType: Int): Holder {
+        val container = FrameLayout(parent.context).apply {
+            layoutParams = android.view.ViewGroup.LayoutParams(
+                android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+            )
+        }
+        return Holder(container)
+    }
+
+    override fun onBindViewHolder(holder: Holder, position: Int) {
+        val page = pages[position]
+        (page.parent as? android.view.ViewGroup)?.removeView(page)
+        holder.container.removeAllViews()
+        holder.container.addView(
+            page,
+            FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT,
+            ),
+        )
+    }
+
+    class Holder(val container: FrameLayout) : RecyclerView.ViewHolder(container)
 }

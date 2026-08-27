@@ -31,6 +31,22 @@ class DownloadDispatcher(
         }
         if (downloads.isEmpty()) return Result(0)
         val statusStore = DownloadStatusStore(context)
+        val workKey = "${platform.key}:${post.id}"
+        ActiveDownloadPostCache.put(workKey, post)
+        val thumbnailUrl = post.media.firstNotNullOfOrNull { media ->
+            media.thumbnailUrl.ifBlank { media.coverUrl }.ifBlank {
+                media.url.takeIf { media.type == MediaType.IMAGE }.orEmpty()
+            }.takeIf(String::isNotBlank)
+        }.orEmpty()
+        statusStore.registerWork(
+            workKey = workKey,
+            platform = platform,
+            sourceUrl = post.sourceUrl,
+            author = post.author,
+            title = post.text.replace(Regex("<[^>]+>"), " ").replace(Regex("\\s+"), " ").trim(),
+            thumbnailUrl = thumbnailUrl,
+            addedFiles = downloads.size,
+        )
         var queued = 0
         downloads.forEach { planned ->
             val download = planned.media
@@ -53,6 +69,7 @@ class DownloadDispatcher(
                     .build()
                 statusStore.registerWorkerTask(
                     workId.toString(),
+                    workKey,
                     DownloadHistoryKeys.stable(download),
                     planned.mediaIdentity,
                 )
@@ -60,7 +77,7 @@ class DownloadDispatcher(
                 WorkManager.getInstance(context).enqueue(request)
                 queued++
             } catch (_: Exception) {
-                registeredWorkId?.let(statusStore::failWorker)
+                registeredWorkId?.let(statusStore::failWorker) ?: statusStore.dropUnqueuedWorkItem(workKey)
             }
         }
         return Result(queued)
