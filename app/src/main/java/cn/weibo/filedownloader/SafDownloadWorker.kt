@@ -1,5 +1,6 @@
 package cn.weibo.filedownloader
 
+import android.annotation.TargetApi
 import android.content.ContentValues
 import android.content.Context
 import android.net.Uri
@@ -89,6 +90,7 @@ class SafDownloadWorker(
         )
     }
 
+    @TargetApi(Build.VERSION_CODES.Q)
     private fun createMediaStoreDestination(
         folderName: String,
         fileName: String,

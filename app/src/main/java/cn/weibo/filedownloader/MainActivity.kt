@@ -245,7 +245,7 @@ class MainActivity : ComponentActivity() {
         platformPrefix = mainPage.findViewById(R.id.platformPrefix)
         brandSwitcher = mainPage.findViewById(R.id.brandSwitcher)
         brandSwitcher.setOnClickListener {
-            switchPlatform(if (platform == Platform.WEIBO) Platform.DOUYIN else Platform.WEIBO)
+            switchPlatform(nextPlatform())
         }
         installPlatformSwipe(toolbar)
         installPlatformSwipe(brandSwitcher)
@@ -307,7 +307,7 @@ class MainActivity : ComponentActivity() {
                     val dx = event.x - downX
                     val dy = event.y - downY
                     if (kotlin.math.abs(dx) > dpInt(56) && kotlin.math.abs(dx) > kotlin.math.abs(dy) * 1.25f) {
-                        switchPlatform(if (dx < 0) Platform.DOUYIN else Platform.WEIBO)
+                        switchPlatform(if (dx < 0) nextPlatform() else previousPlatform())
                         true
                     } else false
                 }
@@ -334,6 +334,11 @@ class MainActivity : ComponentActivity() {
         updatePlatformUi()
     }
 
+    private fun nextPlatform(): Platform = Platform.entries[(platform.ordinal + 1) % Platform.entries.size]
+
+    private fun previousPlatform(): Platform =
+        Platform.entries[(platform.ordinal - 1 + Platform.entries.size) % Platform.entries.size]
+
     private fun clearMediaPresentation() {
         focusedMediaIndex = 0
         mediaCarousel.submitItems(emptyList())
@@ -346,7 +351,15 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun updatePlatformUi() {
-        linkInput.hint = getString(if (platform == Platform.WEIBO) R.string.link_hint else R.string.douyin_link_hint)
+        linkInput.hint = getString(
+            when (platform) {
+                Platform.WEIBO -> R.string.link_hint
+                Platform.DOUYIN -> R.string.douyin_link_hint
+                Platform.BILIBILI -> R.string.bilibili_link_hint
+                Platform.TELEGRAM -> R.string.telegram_link_hint
+                Platform.X -> R.string.x_link_hint
+            },
+        )
         val prefixColor = ContextCompat.getColor(this, platform.prefixColor)
         val actionColor = ContextCompat.getColor(this, platform.actionColor)
         val onActionColor = ContextCompat.getColor(this, platform.onActionColor)
@@ -371,9 +384,7 @@ class MainActivity : ComponentActivity() {
             downloaderTitle.setTextColor(themedColor(com.google.android.material.R.attr.colorOnSurface))
             downloaderTitle.setShadowLayer(0f, 0f, 0f, Color.TRANSPARENT)
         }
-        brandSwitcher.contentDescription = getString(
-            if (platform == Platform.WEIBO) R.string.switch_to_douyin else R.string.switch_to_weibo,
-        )
+        brandSwitcher.contentDescription = getString(R.string.switch_platform)
         parseButton.backgroundTintList = ColorStateList.valueOf(actionColor)
         parseButton.iconTint = ColorStateList.valueOf(onActionColor)
         downloadButton.backgroundTintList = ColorStateList.valueOf(actionColor)
@@ -412,9 +423,9 @@ class MainActivity : ComponentActivity() {
 
     private fun fillFromSharedIntent(intent: Intent?) {
         if (!::linkInput.isInitialized || intent == null) return
-        val openCreatorWork = intent.action == ACTION_OPEN_DOUYIN_WORK
+        val openCreatorWork = intent.action == ACTION_OPEN_CREATOR_WORK
         val sharedText = when {
-            openCreatorWork -> intent.getStringExtra(EXTRA_DOUYIN_WORK_URL)
+            openCreatorWork -> intent.getStringExtra(EXTRA_CREATOR_WORK_URL)
             intent.action == Intent.ACTION_SEND -> intent.getStringExtra(Intent.EXTRA_TEXT)
             intent.dataString != null -> intent.dataString
             else -> null
@@ -426,7 +437,7 @@ class MainActivity : ComponentActivity() {
         linkInput.setSelection(url.length)
         if (openCreatorWork) {
             intent.action = Intent.ACTION_MAIN
-            intent.removeExtra(EXTRA_DOUYIN_WORK_URL)
+            intent.removeExtra(EXTRA_CREATOR_WORK_URL)
             mainPager.setCurrentItem(PAGE_MAIN, false)
             linkInput.post { if (linkInput.text?.toString() == url) parsePost() }
         }
@@ -479,10 +490,18 @@ class MainActivity : ComponentActivity() {
 
     private fun isSupportedUrl(url: String): Boolean =
         url.contains("weibo.com", true) || url.contains("weibo.cn", true) || url.contains("t.cn/", true) ||
-            url.contains("douyin.com", true) || url.contains("iesdouyin.com", true)
+            url.contains("douyin.com", true) || url.contains("iesdouyin.com", true) ||
+            url.contains("bilibili.com", true) || url.contains("b23.tv", true) ||
+            TelegramLinkParser.isSupported(url) || XLinkParser.isSupported(url)
 
     private fun adoptPlatformForUrl(url: String) {
-        val target = if (url.contains("douyin.com", true) || url.contains("iesdouyin.com", true)) Platform.DOUYIN else Platform.WEIBO
+        val target = when {
+            XLinkParser.isSupported(url) -> Platform.X
+            TelegramLinkParser.isSupported(url) -> Platform.TELEGRAM
+            url.contains("bilibili.com", true) || url.contains("b23.tv", true) -> Platform.BILIBILI
+            url.contains("douyin.com", true) || url.contains("iesdouyin.com", true) -> Platform.DOUYIN
+            else -> Platform.WEIBO
+        }
         if (target != platform) switchPlatform(target)
     }
 
@@ -495,7 +514,18 @@ class MainActivity : ComponentActivity() {
         selectedUrls.clear()
         clearMediaPresentation()
         updateSelectionUi()
-        busy(true, getString(if (platform == Platform.WEIBO) R.string.reading_post else R.string.reading_douyin))
+        busy(
+            true,
+            getString(
+                when (platform) {
+                    Platform.WEIBO -> R.string.reading_post
+                    Platform.DOUYIN -> R.string.reading_douyin
+                    Platform.BILIBILI -> R.string.reading_bilibili
+                    Platform.TELEGRAM -> R.string.reading_telegram
+                    Platform.X -> R.string.reading_x
+                },
+            ),
+        )
         if (platform == Platform.DOUYIN) {
             douyinClient?.close()
             douyinClient = DouyinClient(this)
@@ -514,7 +544,13 @@ class MainActivity : ComponentActivity() {
         executor.execute {
             try {
                 val includeLiveCover = preferences.getBoolean("live_cover", false)
-                val loaded = WeiboClient(sessionCookie, this, includeLiveCover).loadPost(url)
+                val loaded = when (platform) {
+                    Platform.WEIBO -> WeiboClient(sessionCookie, this, includeLiveCover).loadPost(url)
+                    Platform.BILIBILI -> BilibiliClient(sessionCookie, this).loadPost(url)
+                    Platform.TELEGRAM -> TelegramClient(this).loadPost(url)
+                    Platform.X -> XClient(this).loadPost(url)
+                    Platform.DOUYIN -> return@execute
+                }
                 runOnUiThread { handleLoadedPost(loaded) }
             } catch (error: WeiboLoginRequiredException) {
                 runOnUiThread {
@@ -538,7 +574,10 @@ class MainActivity : ComponentActivity() {
         }.map { it.url }
         showMedia(loaded)
         val available = selectedUrls.size
-        val summary = if (platform == Platform.DOUYIN && loaded.creator?.id?.isNotBlank() == true) {
+        val summary = if (
+            platform in setOf(Platform.DOUYIN, Platform.BILIBILI, Platform.TELEGRAM, Platform.X) &&
+            loaded.creator?.id?.isNotBlank() == true
+        ) {
             getString(R.string.identified_media_format, loaded.media.size, available)
         } else {
             getString(R.string.identified_format, loaded.media.size, available, loaded.author)
@@ -584,7 +623,18 @@ class MainActivity : ComponentActivity() {
         selectedUrls.clear()
         clearMediaPresentation()
         updateSelectionUi()
-        busy(false, error.message ?: getString(if (platform == Platform.WEIBO) R.string.read_failed else R.string.douyin_read_failed))
+        busy(
+            false,
+            error.message ?: getString(
+                when (platform) {
+                    Platform.WEIBO -> R.string.read_failed
+                    Platform.DOUYIN -> R.string.douyin_read_failed
+                    Platform.BILIBILI -> R.string.bilibili_read_failed
+                    Platform.TELEGRAM -> R.string.telegram_read_failed
+                    Platform.X -> R.string.x_read_failed
+                },
+            ),
+        )
     }
 
     private fun showMedia(value: WeiboPost, resetCarousel: Boolean = true) {
@@ -667,7 +717,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun bindCreatorPresentation(creator: CreatorProfile?) {
-        if (platform != Platform.DOUYIN || creator == null || creator.id.isBlank()) {
+        if (platform !in setOf(Platform.DOUYIN, Platform.BILIBILI, Platform.TELEGRAM, Platform.X) || creator == null || creator.id.isBlank()) {
             creatorCard.visibility = View.GONE
             creatorCard.setOnClickListener(null)
             return
@@ -825,7 +875,7 @@ class MainActivity : ComponentActivity() {
         try {
             val result = DownloadDispatcher(
                 this,
-                if (platform == Platform.WEIBO) sessionCookie else "",
+                if (platform == Platform.DOUYIN) "" else sessionCookie,
                 platform,
             ).enqueueSelected(current, chosen, destinationTreeUri)
             if (result.queued == 0) return toast(getString(R.string.create_download_failed))
@@ -837,7 +887,13 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun refreshSession() {
-        sessionCookie = WeiboSession.cookieHeader()
+        sessionCookie = when (platform) {
+            Platform.WEIBO -> WeiboSession.cookieHeader()
+            Platform.DOUYIN -> DouyinSession.cookieHeader()
+            Platform.BILIBILI -> BilibiliSession.cookieHeader()
+            Platform.TELEGRAM -> ""
+            Platform.X -> ""
+        }
     }
 
 
@@ -887,8 +943,8 @@ class MainActivity : ComponentActivity() {
     private fun toast(value: String) = Toast.makeText(this, value, Toast.LENGTH_SHORT).show()
 
     companion object {
-        const val ACTION_OPEN_DOUYIN_WORK = "cn.weibo.filedownloader.action.OPEN_DOUYIN_WORK"
-        const val EXTRA_DOUYIN_WORK_URL = "douyin_work_url"
+        const val ACTION_OPEN_CREATOR_WORK = "cn.weibo.filedownloader.action.OPEN_CREATOR_WORK"
+        const val EXTRA_CREATOR_WORK_URL = "creator_work_url"
         private const val STATE_PLATFORM = "state_platform"
         private const val STATE_PAGE = "state_page"
         private const val PAGE_MAIN = 0

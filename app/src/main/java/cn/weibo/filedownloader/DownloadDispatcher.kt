@@ -89,6 +89,9 @@ class DownloadDispatcher(
         get() = when (this) {
             Platform.WEIBO -> "https://weibo.com/"
             Platform.DOUYIN -> "https://www.douyin.com/"
+            Platform.BILIBILI -> "https://www.bilibili.com/"
+            Platform.TELEGRAM -> "https://t.me/"
+            Platform.X -> "https://x.com/"
         }
 }
 

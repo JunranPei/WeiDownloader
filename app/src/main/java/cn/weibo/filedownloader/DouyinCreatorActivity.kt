@@ -33,8 +33,12 @@ class DouyinCreatorActivity : Activity() {
     override fun attachBaseContext(newBase: Context) { super.attachBaseContext(ThemeController.wrap(newBase)) }
 
     private val executor = Executors.newSingleThreadExecutor()
-    private val repository = DouyinCreatorRepository()
+    private val douyinRepository = DouyinCreatorRepository()
+    private lateinit var bilibiliRepository: BilibiliCreatorRepository
+    private lateinit var telegramRepository: TelegramCreatorRepository
+    private lateinit var xRepository: XCreatorRepository
     private var webLoader: DouyinCreatorWebLoader? = null
+    private var bilibiliWebLoader: BilibiliCreatorWebLoader? = null
     private lateinit var creator: CreatorProfile
     private lateinit var adapter: CreatorWorksAdapter
     private lateinit var worksList: RecyclerView
@@ -52,26 +56,47 @@ class DouyinCreatorActivity : Activity() {
     private var quickDownloadFailures = 0
     private var quickDownloading = false
     private var cursor = 0L
+    private var bilibiliOffset = ""
+    private var telegramBefore = ""
+    private var xCursor = ""
     private var hasMore = true
     private var loading = false
     private var usingWebFallback = false
+    private var usingBilibiliWebFallback = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val creatorId = intent.getStringExtra(EXTRA_CREATOR_ID).orEmpty()
         val creatorName = intent.getStringExtra(EXTRA_CREATOR_NAME).orEmpty()
+        val creatorPlatform = intent.getStringExtra(EXTRA_CREATOR_PLATFORM)
+            ?.let { key -> Platform.entries.firstOrNull { it.key == key } }
+            ?: Platform.DOUYIN
         if (creatorId.isBlank() || creatorName.isBlank()) {
             finish()
             return
         }
         creator = CreatorProfile(
-            platform = Platform.DOUYIN,
+            platform = creatorPlatform,
             id = creatorId,
             name = creatorName,
             avatarUrl = intent.getStringExtra(EXTRA_CREATOR_AVATAR).orEmpty(),
-            profileUrl = intent.getStringExtra(EXTRA_CREATOR_URL).orEmpty()
-                .ifBlank { "https://www.douyin.com/user/$creatorId" },
+            profileUrl = intent.getStringExtra(EXTRA_CREATOR_URL).orEmpty().ifBlank {
+                when (creatorPlatform) {
+                    Platform.BILIBILI -> "https://space.bilibili.com/$creatorId/dynamic"
+                    Platform.DOUYIN -> "https://www.douyin.com/user/$creatorId"
+                    Platform.TELEGRAM -> "https://t.me/$creatorId"
+                    Platform.X -> "https://x.com/$creatorId"
+                    Platform.WEIBO -> ""
+                }
+            },
         )
+        if (creatorPlatform == Platform.WEIBO) {
+            finish()
+            return
+        }
+        bilibiliRepository = BilibiliCreatorRepository(this)
+        telegramRepository = TelegramCreatorRepository(this)
+        xRepository = XCreatorRepository(this)
         WindowCompat.setDecorFitsSystemWindows(window, false)
         configureTransparentSystemBars()
         setContentView(R.layout.activity_douyin_creator)
@@ -109,8 +134,17 @@ class DouyinCreatorActivity : Activity() {
         retry.setOnClickListener {
             if (adapter.itemCount == 0) {
                 cursor = 0L
+                bilibiliOffset = ""
+                telegramBefore = ""
+                xCursor = ""
                 hasMore = true
-                if (usingWebFallback) {
+                if (creator.platform == Platform.BILIBILI && usingBilibiliWebFallback) {
+                    loading = true
+                    showLoading()
+                    startBilibiliWebFallback()
+                    return@setOnClickListener
+                }
+                if (creator.platform == Platform.DOUYIN && usingWebFallback) {
                     loading = true
                     showLoading()
                     startWebFallback()
@@ -119,7 +153,16 @@ class DouyinCreatorActivity : Activity() {
             }
             loadMore()
         }
-        findViewById<MaterialButton>(R.id.openCreatorInDouyin).setOnClickListener {
+        findViewById<MaterialButton>(R.id.openCreatorInPlatform).apply {
+            setText(
+                when (creator.platform) {
+                    Platform.BILIBILI -> R.string.open_in_bilibili
+                    Platform.TELEGRAM -> R.string.open_in_telegram
+                    Platform.X -> R.string.open_in_x
+                    else -> R.string.open_in_douyin
+                },
+            )
+        }.setOnClickListener {
             runCatching { startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(creator.profileUrl))) }
         }
         quickDownloadButton.setOnClickListener { startQuickDownload() }
@@ -137,6 +180,18 @@ class DouyinCreatorActivity : Activity() {
 
     private fun loadMore() {
         if (loading || !hasMore) return
+        if (creator.platform == Platform.X) {
+            loadMoreFromX()
+            return
+        }
+        if (creator.platform == Platform.TELEGRAM) {
+            loadMoreFromTelegram()
+            return
+        }
+        if (creator.platform == Platform.BILIBILI) {
+            loadMoreFromBilibili()
+            return
+        }
         loading = true
         if (adapter.itemCount == 0) showLoading()
         if (!usingWebFallback && adapter.itemCount == 0 && DouyinSession.isSignedIn()) {
@@ -150,7 +205,7 @@ class DouyinCreatorActivity : Activity() {
         }
         val requestedCursor = cursor
         executor.execute {
-            val result = runCatching { repository.loadPage(creator, requestedCursor) }
+            val result = runCatching { douyinRepository.loadPage(creator, requestedCursor) }
             runOnUiThread {
                 result.fold(
                     onSuccess = { page ->
@@ -164,6 +219,130 @@ class DouyinCreatorActivity : Activity() {
                 )
             }
         }
+    }
+
+    private fun loadMoreFromX() {
+        loading = true
+        if (adapter.itemCount == 0) showLoading()
+        val requestedCursor = xCursor
+        executor.execute {
+            val result = runCatching { xRepository.loadPage(creator, requestedCursor) }
+            runOnUiThread {
+                loading = false
+                result.fold(
+                    onSuccess = { page ->
+                        bindCreator(page.creator)
+                        adapter.append(page.works)
+                        xCursor = page.nextCursor
+                        hasMore = page.hasMore && page.nextCursor != requestedCursor
+                        when {
+                            adapter.itemCount > 0 -> state.visibility = View.GONE
+                            else -> showMessage(R.string.creator_empty, canRetry = false)
+                        }
+                    },
+                    onFailure = { error ->
+                        Log.w(LOG_TAG, "Could not load X creator posts", error)
+                        hasMore = false
+                        showMessage(R.string.creator_load_failed, canRetry = true)
+                    },
+                )
+            }
+        }
+    }
+
+    private fun loadMoreFromTelegram() {
+        loading = true
+        if (adapter.itemCount == 0) showLoading()
+        val requestedBefore = telegramBefore
+        executor.execute {
+            val result = runCatching { telegramRepository.loadPage(creator, requestedBefore) }
+            runOnUiThread {
+                loading = false
+                result.fold(
+                    onSuccess = { page ->
+                        bindCreator(page.creator)
+                        adapter.append(page.works)
+                        telegramBefore = page.nextBefore
+                        hasMore = page.hasMore && page.nextBefore != requestedBefore
+                        when {
+                            adapter.itemCount > 0 -> state.visibility = View.GONE
+                            else -> showMessage(R.string.creator_empty, canRetry = false)
+                        }
+                    },
+                    onFailure = { error ->
+                        Log.w(LOG_TAG, "Could not load Telegram channel posts", error)
+                        hasMore = false
+                        showMessage(R.string.creator_load_failed, canRetry = true)
+                    },
+                )
+            }
+        }
+    }
+
+    private fun loadMoreFromBilibili() {
+        loading = true
+        if (adapter.itemCount == 0) showLoading()
+        if (usingBilibiliWebFallback) {
+            bilibiliWebLoader?.loadMore(::handleBilibiliWebResult)
+                ?: handleBilibiliWebResult(Result.failure(IllegalStateException("Bilibili creator page is not open")))
+            return
+        }
+        val requestedOffset = bilibiliOffset
+        executor.execute {
+            val result = runCatching { bilibiliRepository.loadPage(creator, requestedOffset) }
+            runOnUiThread {
+                loading = false
+                result.fold(
+                    onSuccess = { page ->
+                        if (page.works.isEmpty() && adapter.itemCount == 0 && !usingBilibiliWebFallback) {
+                            startBilibiliWebFallback()
+                            return@fold
+                        }
+                        bindCreator(page.creator)
+                        adapter.append(page.works)
+                        bilibiliOffset = page.nextOffset
+                        hasMore = page.hasMore && page.nextOffset.isNotBlank() && page.nextOffset != requestedOffset
+                        when {
+                            adapter.itemCount > 0 -> state.visibility = View.GONE
+                            else -> showMessage(R.string.creator_empty, canRetry = false)
+                        }
+                    },
+                    onFailure = { error ->
+                        Log.i(LOG_TAG, "Direct Bilibili creator request unavailable; trying its space page: ${error.message}")
+                        startBilibiliWebFallback()
+                    },
+                )
+            }
+        }
+    }
+
+    private fun startBilibiliWebFallback() {
+        usingBilibiliWebFallback = true
+        bilibiliWebLoader?.close()
+        bilibiliWebLoader = BilibiliCreatorWebLoader(this, creator).also { loader ->
+            loader.loadInitial(::handleBilibiliWebResult)
+        }
+    }
+
+    private fun handleBilibiliWebResult(result: Result<BilibiliCreatorPage>) {
+        loading = false
+        result.fold(
+            onSuccess = { page ->
+                bindCreator(page.creator)
+                adapter.append(page.works)
+                bilibiliOffset = page.nextOffset
+                hasMore = page.hasMore
+                when {
+                    adapter.itemCount > 0 -> state.visibility = View.GONE
+                    else -> showMessage(R.string.creator_empty, canRetry = false)
+                }
+            },
+            onFailure = { error ->
+                Log.w(LOG_TAG, "Could not load creator works from the Bilibili space page", error)
+                hasMore = false
+                showMessage(R.string.creator_load_failed, canRetry = true)
+            },
+        )
     }
 
     private fun startWebFallback() {
@@ -217,8 +396,8 @@ class DouyinCreatorActivity : Activity() {
         if (quickDownloading) return
         startActivity(
             Intent(this, MainActivity::class.java)
-                .setAction(MainActivity.ACTION_OPEN_DOUYIN_WORK)
-                .putExtra(MainActivity.EXTRA_DOUYIN_WORK_URL, work.sourceUrl),
+                .setAction(MainActivity.ACTION_OPEN_CREATOR_WORK)
+                .putExtra(MainActivity.EXTRA_CREATOR_WORK_URL, work.sourceUrl),
         )
     }
 
@@ -259,6 +438,29 @@ class DouyinCreatorActivity : Activity() {
             quickDownloadProcessed + 1,
             quickDownloadTotal,
         )
+        if (creator.platform == Platform.BILIBILI) {
+            executor.execute {
+                val result = runCatching {
+                    BilibiliClient(BilibiliSession.cookieHeader(), this).loadPost(work.sourceUrl)
+                }
+                runOnUiThread { handleResolvedQuickDownload(work, result) }
+            }
+            return
+        }
+        if (creator.platform == Platform.TELEGRAM) {
+            executor.execute {
+                val result = runCatching { TelegramClient(this).loadPost(work.sourceUrl) }
+                runOnUiThread { handleResolvedQuickDownload(work, result) }
+            }
+            return
+        }
+        if (creator.platform == Platform.X) {
+            executor.execute {
+                val result = runCatching { XClient(this).loadPost(work.sourceUrl) }
+                runOnUiThread { handleResolvedQuickDownload(work, result) }
+            }
+            return
+        }
         val client = DouyinClient(this)
         quickDownloadClient = client
         client.loadPost(work.sourceUrl, QualityPreference.HIGHEST) { result ->
@@ -267,19 +469,24 @@ class DouyinCreatorActivity : Activity() {
                     client.close()
                     return@runOnUiThread
                 }
-                result.fold(
-                    onSuccess = ::enqueueQuickDownloadPost,
-                    onFailure = {
-                        quickDownloadFailures++
-                        Log.w(LOG_TAG, "Could not resolve selected work ${work.id}", it)
-                    },
-                )
                 client.close()
                 if (quickDownloadClient === client) quickDownloadClient = null
-                quickDownloadProcessed++
-                resolveNextQuickDownload()
+                handleResolvedQuickDownload(work, result)
             }
         }
+    }
+
+    private fun handleResolvedQuickDownload(work: DouyinCreatorWork, result: Result<WeiboPost>) {
+        if (!quickDownloading || isFinishing || isDestroyed) return
+        result.fold(
+            onSuccess = ::enqueueQuickDownloadPost,
+            onFailure = {
+                quickDownloadFailures++
+                Log.w(LOG_TAG, "Could not resolve selected work ${work.id}", it)
+            },
+        )
+        quickDownloadProcessed++
+        resolveNextQuickDownload()
     }
 
     private fun enqueueQuickDownloadPost(post: WeiboPost) {
@@ -289,7 +496,14 @@ class DouyinCreatorActivity : Activity() {
         try {
             val destinationTreeUri = getSharedPreferences("downloader_settings", MODE_PRIVATE)
                 .getString("destination_uri", null)
-            quickDownloadQueued += DownloadDispatcher(this, "", Platform.DOUYIN)
+            val cookie = when (creator.platform) {
+                Platform.DOUYIN -> DouyinSession.cookieHeader()
+                Platform.BILIBILI -> BilibiliSession.cookieHeader()
+                Platform.TELEGRAM -> ""
+                Platform.X -> ""
+                Platform.WEIBO -> ""
+            }
+            quickDownloadQueued += DownloadDispatcher(this, cookie, creator.platform)
                 .enqueueSelected(post, freshMedia, destinationTreeUri)
                 .queued
         } catch (error: Exception) {
@@ -355,6 +569,7 @@ class DouyinCreatorActivity : Activity() {
         quickDownloading = false
         quickDownloadClient?.close()
         webLoader?.close()
+        bilibiliWebLoader?.close()
         executor.shutdownNow()
         super.onDestroy()
     }
@@ -365,9 +580,11 @@ class DouyinCreatorActivity : Activity() {
         private const val EXTRA_CREATOR_NAME = "creator_name"
         private const val EXTRA_CREATOR_AVATAR = "creator_avatar"
         private const val EXTRA_CREATOR_URL = "creator_url"
+        private const val EXTRA_CREATOR_PLATFORM = "creator_platform"
 
         fun createIntent(context: Context, creator: CreatorProfile): Intent =
             Intent(context, DouyinCreatorActivity::class.java)
+                .putExtra(EXTRA_CREATOR_PLATFORM, creator.platform.key)
                 .putExtra(EXTRA_CREATOR_ID, creator.id)
                 .putExtra(EXTRA_CREATOR_NAME, creator.name)
                 .putExtra(EXTRA_CREATOR_AVATAR, creator.avatarUrl)

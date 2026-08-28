@@ -32,7 +32,9 @@ class SettingsActivity : ComponentActivity() {
     private val destinationRequest = 2002
     private val preferences by lazy { getSharedPreferences("downloader_settings", Context.MODE_PRIVATE) }
     private val platformKey by lazy { intent.getStringExtra(EXTRA_PLATFORM).orEmpty() }
-    private val isDouyin get() = platformKey == Platform.DOUYIN.key
+    private val platform by lazy {
+        Platform.entries.firstOrNull { it.key == platformKey } ?: Platform.WEIBO
+    }
     private lateinit var loginStatus: TextView
     private lateinit var loginButton: MaterialButton
     private lateinit var themeSegments: ComposeView
@@ -90,7 +92,7 @@ class SettingsActivity : ComponentActivity() {
         loginButton.setOnClickListener {
             startActivityForResult(
                 Intent(this, LoginActivity::class.java)
-                    .putExtra(LoginActivity.EXTRA_PLATFORM, if (isDouyin) Platform.DOUYIN.key else Platform.WEIBO.key),
+                    .putExtra(LoginActivity.EXTRA_PLATFORM, platform.key),
                 loginRequest,
             )
         }
@@ -106,11 +108,27 @@ class SettingsActivity : ComponentActivity() {
 
     private fun configurePlatform() {
         findViewById<TextView>(R.id.settingsTitle).text = getString(
-            if (isDouyin) R.string.douyin_settings_title else R.string.settings,
+            when (platform) {
+                Platform.WEIBO -> R.string.settings
+                Platform.DOUYIN -> R.string.douyin_settings_title
+                Platform.BILIBILI -> R.string.bilibili_settings_title
+                Platform.TELEGRAM -> R.string.telegram_settings_title
+                Platform.X -> R.string.x_settings_title
+            },
         )
-        findViewById<TextView>(R.id.settingsPlatformSectionTitle).text = getString(
-            if (isDouyin) R.string.douyin_account else R.string.weibo_account,
+        val accountSectionTitle = findViewById<TextView>(R.id.settingsPlatformSectionTitle)
+        accountSectionTitle.text = getString(
+            when (platform) {
+                Platform.WEIBO -> R.string.weibo_account
+                Platform.DOUYIN -> R.string.douyin_account
+                Platform.BILIBILI -> R.string.bilibili_account
+                Platform.TELEGRAM -> R.string.telegram_public_posts
+                Platform.X -> R.string.x_public_posts
+            },
         )
+        val accountVisibility = if (platform in setOf(Platform.TELEGRAM, Platform.X)) View.GONE else View.VISIBLE
+        accountSectionTitle.visibility = accountVisibility
+        findViewById<View>(R.id.settingsPlatformAccountCard).visibility = accountVisibility
     }
     private fun configureLiveCover() {
         liveCoverSwitch.isChecked = preferences.getBoolean("live_cover", false)
@@ -242,17 +260,29 @@ class SettingsActivity : ComponentActivity() {
 
     private fun refreshLoginState() {
         if (!::loginStatus.isInitialized) return
-        if (isDouyin) {
-            val loggedIn = DouyinSession.isSignedIn()
-            loginStatus.text = getString(
-                if (loggedIn) R.string.douyin_login_active else R.string.douyin_login_inactive,
-            )
-            loginButton.text = getString(if (loggedIn) R.string.login_again else R.string.login_douyin)
-            return
+        when (platform) {
+            Platform.WEIBO -> {
+                val loggedIn = WeiboSession.isSignedIn()
+                loginStatus.text = getString(if (loggedIn) R.string.login_active else R.string.login_inactive)
+                loginButton.text = getString(if (loggedIn) R.string.login_again else R.string.login_weibo)
+            }
+            Platform.DOUYIN -> {
+                val loggedIn = DouyinSession.isSignedIn()
+                loginStatus.text = getString(
+                    if (loggedIn) R.string.douyin_login_active else R.string.douyin_login_inactive,
+                )
+                loginButton.text = getString(if (loggedIn) R.string.login_again else R.string.login_douyin)
+            }
+            Platform.BILIBILI -> {
+                val loggedIn = BilibiliSession.isSignedIn()
+                loginStatus.text = getString(
+                    if (loggedIn) R.string.bilibili_login_active else R.string.bilibili_login_inactive,
+                )
+                loginButton.text = getString(if (loggedIn) R.string.login_again else R.string.login_bilibili)
+            }
+            Platform.TELEGRAM -> Unit
+            Platform.X -> Unit
         }
-        val loggedIn = WeiboSession.isSignedIn()
-        loginStatus.text = getString(if (loggedIn) R.string.login_active else R.string.login_inactive)
-        loginButton.text = getString(if (loggedIn) R.string.login_again else R.string.login_weibo)
     }
 
     private fun configureInsets() {

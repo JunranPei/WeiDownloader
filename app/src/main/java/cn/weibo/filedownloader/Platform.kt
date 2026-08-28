@@ -21,4 +21,25 @@ enum class Platform(
         R.color.platform_douyin_black,
         R.color.platform_douyin_on_action,
     ),
+    BILIBILI(
+        "bilibili",
+        "Bili",
+        R.color.platform_bilibili,
+        R.color.platform_bilibili,
+        R.color.platform_bilibili_on_action,
+    ),
+    TELEGRAM(
+        "telegram",
+        "Tele",
+        R.color.platform_telegram,
+        R.color.platform_telegram,
+        R.color.platform_telegram_on_action,
+    ),
+    X(
+        "x",
+        "X",
+        R.color.platform_x,
+        R.color.platform_x,
+        R.color.platform_x_on_action,
+    ),
 }

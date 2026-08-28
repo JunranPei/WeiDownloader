@@ -20,7 +20,9 @@ class LoginActivity : Activity() {
     private lateinit var doneButton: MaterialButton
     private val handler = android.os.Handler(android.os.Looper.getMainLooper())
     private val platformKey by lazy { intent.getStringExtra(EXTRA_PLATFORM).orEmpty() }
-    private val isDouyin get() = platformKey == Platform.DOUYIN.key
+    private val platform by lazy {
+        Platform.entries.firstOrNull { it.key == platformKey } ?: Platform.WEIBO
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -31,7 +33,9 @@ class LoginActivity : Activity() {
         webView = findViewById<WebView>(R.id.loginWebView).apply {
             settings.javaScriptEnabled = true
             settings.domStorageEnabled = true
-            if (isDouyin) settings.userAgentString = DOUYIN_WEB_USER_AGENT
+            if (platform != Platform.WEIBO) {
+                settings.userAgentString = DESKTOP_WEB_USER_AGENT
+            }
             settings.useWideViewPort = true
             settings.loadWithOverviewMode = true
             settings.setSupportZoom(true)
@@ -49,7 +53,15 @@ class LoginActivity : Activity() {
                 manager.setAcceptCookie(true)
                 manager.setAcceptThirdPartyCookies(this, true)
             }
-            loadUrl(if (isDouyin) DOUYIN_LOGIN_URL else WEIBO_LOGIN_URL)
+            loadUrl(
+                when (platform) {
+                    Platform.WEIBO -> WEIBO_LOGIN_URL
+                    Platform.DOUYIN -> DOUYIN_LOGIN_URL
+                    Platform.BILIBILI -> BILIBILI_LOGIN_URL
+                    Platform.TELEGRAM -> TELEGRAM_LOGIN_URL
+                    Platform.X -> X_LOGIN_URL
+                },
+            )
         }
         doneButton.setOnClickListener {
             CookieManager.getInstance().flush()
@@ -82,7 +94,13 @@ class LoginActivity : Activity() {
     }
 
     private fun refreshLoginState() {
-        val signedIn = if (isDouyin) DouyinSession.isSignedIn() else WeiboSession.isSignedIn()
+        val signedIn = when (platform) {
+            Platform.WEIBO -> WeiboSession.isSignedIn()
+            Platform.DOUYIN -> DouyinSession.isSignedIn()
+            Platform.BILIBILI -> BilibiliSession.isSignedIn()
+            Platform.TELEGRAM -> false
+            Platform.X -> false
+        }
         doneButton.setText(if (signedIn) R.string.login_done_ready else R.string.login_done_waiting)
     }
 
@@ -114,7 +132,10 @@ class LoginActivity : Activity() {
         private const val WEIBO_LOGIN_URL = "https://passport.weibo.com/"
         private const val DOUYIN_LOGIN_URL =
             "https://sso.douyin.com/?service=www.douyin.com%2Flogin%3Ftype%3Dstormplatform_home"
-        private const val DOUYIN_WEB_USER_AGENT =
+        private const val BILIBILI_LOGIN_URL = "https://passport.bilibili.com/login"
+        private const val TELEGRAM_LOGIN_URL = "https://web.telegram.org/a/"
+        private const val X_LOGIN_URL = "https://x.com/i/flow/login"
+        private const val DESKTOP_WEB_USER_AGENT =
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
                 "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
         private const val LOGIN_POLL_MS = 1_000L
