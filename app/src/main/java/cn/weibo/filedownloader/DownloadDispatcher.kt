@@ -20,7 +20,7 @@ class DownloadDispatcher(
         enqueue(post, mediaItems, destinationTreeUri)
 
     private fun enqueue(post: WeiboPost, mediaItems: List<MediaItem>, destinationTreeUri: String?): Result {
-        val folderName = DownloadOrganization.folderName(context, post.author, post.id)
+        val folderName = DownloadOrganization.folderName(context, platform, post.author, post.id)
         val includeLiveCover = context
             .getSharedPreferences("downloader_settings", Context.MODE_PRIVATE)
             .getBoolean("live_cover", false)

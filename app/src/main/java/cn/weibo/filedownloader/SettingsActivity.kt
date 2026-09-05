@@ -101,7 +101,7 @@ class SettingsActivity : ComponentActivity() {
         }
         findViewById<View>(R.id.settingsDestinationChoose).setOnClickListener { openDestinationPicker() }
         resetDestinationButton.setOnClickListener {
-            preferences.edit().remove(PREF_DESTINATION_URI).apply()
+            DownloadDestination.clear(preferences, platform)
             refreshDestination()
         }
     }
@@ -142,6 +142,7 @@ class SettingsActivity : ComponentActivity() {
         val initialIndex = if (stored == DownloadOrganization.PER_POST_FOLDER) 1 else 0
         organizationSummary.text = getString(
             if (initialIndex == 0) R.string.organization_single else R.string.organization_per_post,
+            platform.downloadFolderName,
         )
         organizationSegments.setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed)
         organizationSegments.setContent {
@@ -162,6 +163,7 @@ class SettingsActivity : ComponentActivity() {
                 preferences.edit().putString(DownloadOrganization.PREFERENCE, value).apply()
                 organizationSummary.text = getString(
                     if (index == 0) R.string.organization_single else R.string.organization_per_post,
+                    platform.downloadFolderName,
                 )
             }
         }
@@ -205,7 +207,7 @@ class SettingsActivity : ComponentActivity() {
                     Intent.FLAG_GRANT_PREFIX_URI_PERMISSION,
             )
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                preferences.getString(PREF_DESTINATION_URI, null)?.let {
+                DownloadDestination.uri(preferences, platform)?.let {
                     putExtra(DocumentsContract.EXTRA_INITIAL_URI, Uri.parse(it))
                 }
             }
@@ -225,21 +227,21 @@ class SettingsActivity : ComponentActivity() {
             toast(getString(R.string.folder_permission_failed))
             return
         }
-        preferences.edit().putString(PREF_DESTINATION_URI, uri.toString()).apply()
+        DownloadDestination.save(preferences, platform, uri.toString())
         refreshDestination()
     }
 
     private fun refreshDestination() {
-        val stored = preferences.getString(PREF_DESTINATION_URI, null)
+        val stored = DownloadDestination.uri(preferences, platform)
         val uri = stored?.let(Uri::parse)
         val hasWriteGrant = uri != null && contentResolver.persistedUriPermissions.any {
             it.uri == uri && it.isWritePermission
         }
-        if (uri != null && !hasWriteGrant) preferences.edit().remove(PREF_DESTINATION_URI).apply()
+        if (uri != null && !hasWriteGrant) DownloadDestination.clear(preferences, platform)
         destinationValue.text = if (uri != null && hasWriteGrant) {
             destinationDisplayName(uri)
         } else {
-            getString(R.string.default_destination)
+            getString(R.string.default_destination, platform.downloadFolderName)
         }
         resetDestinationButton.visibility = if (uri != null && hasWriteGrant) View.VISIBLE else View.GONE
     }
@@ -321,6 +323,5 @@ class SettingsActivity : ComponentActivity() {
 
     companion object {
         const val EXTRA_PLATFORM = "platform"
-        private const val PREF_DESTINATION_URI = "destination_uri"
     }
 }

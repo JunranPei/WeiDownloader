@@ -494,8 +494,10 @@ class DouyinCreatorActivity : Activity() {
         val freshMedia = post.media.filterNot(history::contains)
         if (freshMedia.isEmpty()) return
         try {
-            val destinationTreeUri = getSharedPreferences("downloader_settings", MODE_PRIVATE)
-                .getString("destination_uri", null)
+            val destinationTreeUri = DownloadDestination.uri(
+                getSharedPreferences("downloader_settings", MODE_PRIVATE),
+                creator.platform,
+            )
             val cookie = when (creator.platform) {
                 Platform.DOUYIN -> DouyinSession.cookieHeader()
                 Platform.BILIBILI -> BilibiliSession.cookieHeader()

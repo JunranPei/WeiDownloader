@@ -872,7 +872,7 @@ class MainActivity : ComponentActivity() {
         val current = post ?: return
         val chosen = current.media.filter { selectedUrls.contains(it.url) }
         if (chosen.isEmpty()) return toast(getString(R.string.select_at_least_one))
-        val destinationTreeUri = preferences.getString("destination_uri", null)
+        val destinationTreeUri = DownloadDestination.uri(preferences, platform)
         try {
             val result = DownloadDispatcher(
                 this,

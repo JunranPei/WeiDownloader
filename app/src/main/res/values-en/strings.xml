@@ -88,13 +88,13 @@
     <string name="live_cover_title">Live Photo cover</string>
     <string name="live_cover_summary">Save the still image with the motion file</string>
     <string name="organization_title">Folder organization</string>
-    <string name="organization_single">Keep everything in WeiDownloader</string>
-    <string name="organization_per_post">Create a folder for each work</string>
+    <string name="organization_single">Keep everything in WeiDownloader/%1$s</string>
+    <string name="organization_per_post">Create work folders under WeiDownloader/%1$s</string>
     <string name="organization_single_short">One folder</string>
     <string name="organization_per_post_short">By work</string>
     <string name="save_directory">Save folder</string>
     <string name="directory_helper">Choose a folder on your device, storage card, or file provider</string>
-    <string name="default_destination">System Download/WeiDownloader</string>
+    <string name="default_destination">System Download/WeiDownloader/%1$s</string>
     <string name="choose_folder">Choose folder</string>
     <string name="use_default_folder">Use default</string>
     <string name="folder_permission_failed">WeiDownloader could not get write access to that folder. Choose it again.</string>
@@ -108,7 +108,7 @@
     <string name="supported_links">Supported links</string>
     <string name="responsible_use">Responsible use</string>
     <string name="privacy_and_storage">Privacy and storage</string>
-    <string name="about_privacy">Platform sessions stay in the app WebView and are used only to request content available to your account. Downloads go to System Download/WeiDownloader by default, or to another folder you authorize through the system picker.</string>
+    <string name="about_privacy">Platform sessions stay in the app WebView and are used only to request content available to your account. Downloads are separated by platform under System Download/WeiDownloader by default, and each platform can use a separately authorized folder.</string>
     <string name="not_affiliated">WeiDownloader is an independent tool and is not affiliated with or endorsed by Weibo, Douyin, Bilibili, or their operators.</string>
     <string name="view_github">View project on GitHub</string>
     <string name="version_format">Version %1$s</string>
