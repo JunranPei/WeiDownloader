@@ -18,6 +18,10 @@ class WeiboLinkParserTest {
     @Test
     fun recognizesVideoComponentFamilies() {
         assertVideo(
+            "https://video.weibo.com/show?fid=1034:5333656487788645",
+            "1034:5333656487788645",
+        )
+        assertVideo(
             "https://video.weibo.com/show?fid=1034:5210889180348492",
             "1034:5210889180348492",
         )

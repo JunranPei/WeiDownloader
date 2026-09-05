@@ -25,9 +25,16 @@ internal class WeiboLinkResolver(
         if (sourceUrl.isBlank()) {
             throw IllegalArgumentException(context.getString(R.string.url_not_found))
         }
+
+        // Legacy video.weibo.com URLs already carry the complete fid. They now
+        // redirect through a visitor/login page, so classifying the source first
+        // avoids turning a valid public-video URL into an unrelated login URL.
+        WeiboLinkParser.targetFromUrl(sourceUrl)?.let { directTarget ->
+            return WeiboResolvedLink(sourceUrl, sourceUrl, directTarget)
+        }
+
         val canonicalUrl = http.resolveRedirects(sourceUrl)
         val target = WeiboLinkParser.targetFromUrl(canonicalUrl)
-            ?: WeiboLinkParser.targetFromUrl(sourceUrl)
             ?: throw IllegalArgumentException(context.getString(R.string.post_id_not_found))
         return WeiboResolvedLink(sourceUrl, canonicalUrl, target)
     }
