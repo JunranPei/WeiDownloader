@@ -23,6 +23,7 @@ import androidx.compose.ui.platform.ViewCompositionStrategy
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.doOnAttach
 import androidx.core.widget.doAfterTextChanged
 import androidx.recyclerview.widget.RecyclerView
 import androidx.viewpager2.widget.ViewPager2
@@ -922,7 +923,7 @@ class MainActivity : ComponentActivity() {
             scroll.post { updateContentPosition(post?.media?.isNotEmpty() == true) }
             insets
         }
-        ViewCompat.requestApplyInsets(root)
+        root.doOnAttach { ViewCompat.requestApplyInsets(it) }
     }
 
     @Suppress("DEPRECATION")

@@ -10,6 +10,7 @@ import android.widget.TextView
 import androidx.core.content.ContextCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.doOnAttach
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.ListAdapter
@@ -68,7 +69,7 @@ internal class DownloadTasksPageController(
             list.setPadding(listPadding[0] + safe.left, listPadding[1], listPadding[2] + safe.right, listPadding[3] + safe.bottom)
             insets
         }
-        ViewCompat.requestApplyInsets(root)
+        root.doOnAttach { ViewCompat.requestApplyInsets(it) }
     }
 }
 
