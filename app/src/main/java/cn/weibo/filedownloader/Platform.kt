@@ -7,6 +7,7 @@ enum class Platform(
     val prefixColor: Int,
     val actionColor: Int,
     val onActionColor: Int,
+    val enabled: Boolean = true,
 ) {
     WEIBO(
         "weibo",
@@ -39,6 +40,7 @@ enum class Platform(
         R.color.platform_telegram,
         R.color.platform_telegram,
         R.color.platform_telegram_on_action,
+        false,
     ),
     X(
         "x",
@@ -56,4 +58,10 @@ enum class Platform(
         R.color.platform_instagram,
         R.color.platform_instagram_on_action,
     ),
+
+    ;
+
+    companion object {
+        val enabledEntries: List<Platform> by lazy { entries.filter(Platform::enabled) }
+    }
 }

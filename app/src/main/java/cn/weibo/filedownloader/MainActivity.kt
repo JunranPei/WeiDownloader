@@ -99,7 +99,7 @@ class MainActivity : ComponentActivity() {
         configureTransparentSystemBars()
         preferences = getSharedPreferences("downloader_settings", Context.MODE_PRIVATE)
         appliedThemeMode = storedThemeMode()
-        platform = Platform.entries.firstOrNull { it.key == savedInstanceState?.getString(STATE_PLATFORM) }
+        platform = Platform.enabledEntries.firstOrNull { it.key == savedInstanceState?.getString(STATE_PLATFORM) }
             ?: Platform.WEIBO
         setContentView(R.layout.activity_main_pager)
         mainPager = findViewById(R.id.mainPager)
@@ -335,10 +335,17 @@ class MainActivity : ComponentActivity() {
         updatePlatformUi()
     }
 
-    private fun nextPlatform(): Platform = Platform.entries[(platform.ordinal + 1) % Platform.entries.size]
+    private fun nextPlatform(): Platform {
+        val values = Platform.enabledEntries
+        val index = values.indexOf(platform)
+        return values[(index + 1).coerceAtLeast(0) % values.size]
+    }
 
-    private fun previousPlatform(): Platform =
-        Platform.entries[(platform.ordinal - 1 + Platform.entries.size) % Platform.entries.size]
+    private fun previousPlatform(): Platform {
+        val values = Platform.enabledEntries
+        val index = values.indexOf(platform)
+        return values[if (index <= 0) values.lastIndex else index - 1]
+    }
 
     private fun clearMediaPresentation() {
         focusedMediaIndex = 0
@@ -494,13 +501,14 @@ class MainActivity : ComponentActivity() {
         url.contains("weibo.com", true) || url.contains("weibo.cn", true) || url.contains("t.cn/", true) ||
             url.contains("douyin.com", true) || url.contains("iesdouyin.com", true) ||
             url.contains("bilibili.com", true) || url.contains("b23.tv", true) ||
-            TelegramLinkParser.isSupported(url) || XLinkParser.isSupported(url) || InstagramLinkParser.isSupported(url)
+            (Platform.TELEGRAM.enabled && TelegramLinkParser.isSupported(url)) ||
+            XLinkParser.isSupported(url) || InstagramLinkParser.isSupported(url)
 
     private fun adoptPlatformForUrl(url: String) {
         val target = when {
             InstagramLinkParser.isSupported(url) -> Platform.INSTAGRAM
             XLinkParser.isSupported(url) -> Platform.X
-            TelegramLinkParser.isSupported(url) -> Platform.TELEGRAM
+            Platform.TELEGRAM.enabled && TelegramLinkParser.isSupported(url) -> Platform.TELEGRAM
             url.contains("bilibili.com", true) || url.contains("b23.tv", true) -> Platform.BILIBILI
             url.contains("douyin.com", true) || url.contains("iesdouyin.com", true) -> Platform.DOUYIN
             else -> Platform.WEIBO

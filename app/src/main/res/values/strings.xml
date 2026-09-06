@@ -107,7 +107,7 @@
     <string name="about_us">关于我们</string>
     <string name="about_weidownloader">关于 WeiDownloader</string>
     <string name="about_summary">功能说明、支持范围与隐私信息</string>
-    <string name="about_description">WeiDownloader 用于识别并保存受支持平台链接中的媒体，支持微博、抖音、哔哩哔哩、Telegram、X 和 Instagram。</string>
+    <string name="about_description">WeiDownloader 用于识别并保存受支持平台链接中的媒体，支持微博、抖音、哔哩哔哩、X 和 Instagram。</string>
     <string name="supported_links">支持的链接</string>
     <string name="responsible_use">合理使用</string>
     <string name="privacy_and_storage">隐私与存储</string>

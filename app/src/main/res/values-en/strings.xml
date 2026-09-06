@@ -107,7 +107,7 @@
     <string name="about_us">About us</string>
     <string name="about_weidownloader">About WeiDownloader</string>
     <string name="about_summary">Features, supported links, and privacy information</string>
-    <string name="about_description">WeiDownloader identifies and saves media from supported Weibo, Douyin, Bilibili, Telegram, X, and Instagram links.</string>
+    <string name="about_description">WeiDownloader identifies and saves media from supported Weibo, Douyin, Bilibili, X, and Instagram links.</string>
     <string name="supported_links">Supported links</string>
     <string name="responsible_use">Responsible use</string>
     <string name="privacy_and_storage">Privacy and storage</string>
