@@ -60,6 +60,7 @@ class LoginActivity : Activity() {
                     Platform.BILIBILI -> BILIBILI_LOGIN_URL
                     Platform.TELEGRAM -> TELEGRAM_LOGIN_URL
                     Platform.X -> X_LOGIN_URL
+                    Platform.INSTAGRAM -> INSTAGRAM_LOGIN_URL
                 },
             )
         }
@@ -100,6 +101,7 @@ class LoginActivity : Activity() {
             Platform.BILIBILI -> BilibiliSession.isSignedIn()
             Platform.TELEGRAM -> false
             Platform.X -> false
+            Platform.INSTAGRAM -> false
         }
         doneButton.setText(if (signedIn) R.string.login_done_ready else R.string.login_done_waiting)
     }
@@ -135,6 +137,7 @@ class LoginActivity : Activity() {
         private const val BILIBILI_LOGIN_URL = "https://passport.bilibili.com/login"
         private const val TELEGRAM_LOGIN_URL = "https://web.telegram.org/a/"
         private const val X_LOGIN_URL = "https://x.com/i/flow/login"
+        private const val INSTAGRAM_LOGIN_URL = "https://www.instagram.com/accounts/login/"
         private const val DESKTOP_WEB_USER_AGENT =
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
                 "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"

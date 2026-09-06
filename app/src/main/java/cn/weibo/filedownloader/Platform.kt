@@ -48,4 +48,12 @@ enum class Platform(
         R.color.platform_x,
         R.color.platform_x_on_action,
     ),
+    INSTAGRAM(
+        "instagram",
+        "Insta",
+        "Instagram",
+        R.color.platform_instagram,
+        R.color.platform_instagram,
+        R.color.platform_instagram_on_action,
+    ),
 }

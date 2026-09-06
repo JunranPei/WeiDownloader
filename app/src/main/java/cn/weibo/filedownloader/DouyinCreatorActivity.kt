@@ -86,11 +86,12 @@ class DouyinCreatorActivity : Activity() {
                     Platform.DOUYIN -> "https://www.douyin.com/user/$creatorId"
                     Platform.TELEGRAM -> "https://t.me/$creatorId"
                     Platform.X -> "https://x.com/$creatorId"
+                    Platform.INSTAGRAM -> "https://www.instagram.com/$creatorId/"
                     Platform.WEIBO -> ""
                 }
             },
         )
-        if (creatorPlatform == Platform.WEIBO) {
+        if (creatorPlatform in setOf(Platform.WEIBO, Platform.INSTAGRAM)) {
             finish()
             return
         }
@@ -503,6 +504,7 @@ class DouyinCreatorActivity : Activity() {
                 Platform.BILIBILI -> BilibiliSession.cookieHeader()
                 Platform.TELEGRAM -> ""
                 Platform.X -> ""
+                Platform.INSTAGRAM -> ""
                 Platform.WEIBO -> ""
             }
             quickDownloadQueued += DownloadDispatcher(this, cookie, creator.platform)

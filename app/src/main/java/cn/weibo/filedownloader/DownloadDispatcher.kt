@@ -92,6 +92,7 @@ class DownloadDispatcher(
             Platform.BILIBILI -> "https://www.bilibili.com/"
             Platform.TELEGRAM -> "https://t.me/"
             Platform.X -> "https://x.com/"
+            Platform.INSTAGRAM -> "https://www.instagram.com/"
         }
 }
 

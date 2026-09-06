@@ -10,12 +10,14 @@
     <string name="bilibili_settings_title">Bilibili settings</string>
     <string name="telegram_settings_title">Telegram settings</string>
     <string name="x_settings_title">X settings</string>
+    <string name="instagram_settings_title">Instagram settings</string>
     <string name="paste_once">Paste</string>
     <string name="link_hint">Paste a Weibo post link</string>
     <string name="douyin_link_hint">Paste a Douyin share link</string>
     <string name="bilibili_link_hint">Paste a Bilibili video or image-post link</string>
     <string name="telegram_link_hint">Paste a public Telegram channel-post link</string>
     <string name="x_link_hint">Paste an X / Twitter post link</string>
+    <string name="instagram_link_hint">Paste an Instagram post or Reel link</string>
     <string name="link_helper">Supports Weibo posts, video component pages, mobile shares, and t.cn links</string>
     <string name="recognize_media">Find media</string>
     <string name="recognition_results">Media</string>
@@ -68,6 +70,7 @@
     <string name="bilibili_account">Bilibili account</string>
     <string name="telegram_public_posts">Public Telegram channels</string>
     <string name="x_public_posts">Public X posts</string>
+    <string name="instagram_public_posts">Public Instagram posts</string>
     <string name="douyin_settings">Douyin downloads</string>
     <string name="douyin_settings_no_login">Public Douyin links do not require sign-in</string>
     <string name="checking_login">Checking sign-in status…</string>
@@ -104,7 +107,7 @@
     <string name="about_us">About us</string>
     <string name="about_weidownloader">About WeiDownloader</string>
     <string name="about_summary">Features, supported links, and privacy information</string>
-    <string name="about_description">WeiDownloader identifies and saves media from supported Weibo, Douyin, and Bilibili links.</string>
+    <string name="about_description">WeiDownloader identifies and saves media from supported Weibo, Douyin, Bilibili, Telegram, X, and Instagram links.</string>
     <string name="supported_links">Supported links</string>
     <string name="responsible_use">Responsible use</string>
     <string name="privacy_and_storage">Privacy and storage</string>
@@ -136,6 +139,7 @@
     <string name="reading_bilibili">Reading this Bilibili work…</string>
     <string name="reading_telegram">Reading this Telegram post…</string>
     <string name="reading_x">Reading this X post…</string>
+    <string name="reading_instagram">Reading this Instagram post…</string>
     <string name="identified_format">Found %1$d files · %2$d available · %3$s</string>
     <string name="identified_media_format">Found %1$d files · %2$d available</string>
     <string name="read_failed">Could not read the post. Try again later.</string>
@@ -197,5 +201,13 @@
     <string name="x_http_error">The X data provider returned HTTP %1$d.</string>
     <string name="x_empty_response">The X data provider returned an empty response. Try again shortly.</string>
     <string name="x_network_error">Could not read X: %1$s</string>
+    <string name="instagram_url_not_found">No recognizable Instagram post or Reel link was found.</string>
+    <string name="instagram_no_media">This Instagram post has no publicly downloadable image or video.</string>
+    <string name="instagram_read_failed">Could not read Instagram. Check that the post is public and still available.</string>
+    <string name="instagram_default_title">Instagram post</string>
+    <string name="instagram_default_author">Instagram user</string>
+    <string name="instagram_http_error">Instagram returned HTTP %1$d.</string>
+    <string name="instagram_empty_response">Instagram returned an empty response. Try again shortly.</string>
+    <string name="instagram_network_error">Could not read Instagram: %1$s</string>
     <string name="open_in_x">View on X</string>
 </resources>

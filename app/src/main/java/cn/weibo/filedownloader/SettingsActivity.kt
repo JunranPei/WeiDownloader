@@ -114,6 +114,7 @@ class SettingsActivity : ComponentActivity() {
                 Platform.BILIBILI -> R.string.bilibili_settings_title
                 Platform.TELEGRAM -> R.string.telegram_settings_title
                 Platform.X -> R.string.x_settings_title
+                Platform.INSTAGRAM -> R.string.instagram_settings_title
             },
         )
         val accountSectionTitle = findViewById<TextView>(R.id.settingsPlatformSectionTitle)
@@ -124,9 +125,10 @@ class SettingsActivity : ComponentActivity() {
                 Platform.BILIBILI -> R.string.bilibili_account
                 Platform.TELEGRAM -> R.string.telegram_public_posts
                 Platform.X -> R.string.x_public_posts
+                Platform.INSTAGRAM -> R.string.instagram_public_posts
             },
         )
-        val accountVisibility = if (platform in setOf(Platform.TELEGRAM, Platform.X)) View.GONE else View.VISIBLE
+        val accountVisibility = if (platform in setOf(Platform.TELEGRAM, Platform.X, Platform.INSTAGRAM)) View.GONE else View.VISIBLE
         accountSectionTitle.visibility = accountVisibility
         findViewById<View>(R.id.settingsPlatformAccountCard).visibility = accountVisibility
     }
@@ -284,6 +286,7 @@ class SettingsActivity : ComponentActivity() {
             }
             Platform.TELEGRAM -> Unit
             Platform.X -> Unit
+            Platform.INSTAGRAM -> Unit
         }
     }
 

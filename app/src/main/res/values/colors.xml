@@ -11,6 +11,8 @@
     <color name="platform_telegram_on_action">#FFFFFF</color>
     <color name="platform_x">#0F1419</color>
     <color name="platform_x_on_action">#FFFFFF</color>
+    <color name="platform_instagram">#C13584</color>
+    <color name="platform_instagram_on_action">#FFFFFF</color>
     <color name="platform_neutral">#56423A</color>
     <color name="md_theme_primary">#B84F00</color>
     <color name="md_theme_onPrimary">#FFFFFF</color>

@@ -359,6 +359,7 @@ class MainActivity : ComponentActivity() {
                 Platform.BILIBILI -> R.string.bilibili_link_hint
                 Platform.TELEGRAM -> R.string.telegram_link_hint
                 Platform.X -> R.string.x_link_hint
+                Platform.INSTAGRAM -> R.string.instagram_link_hint
             },
         )
         val prefixColor = ContextCompat.getColor(this, platform.prefixColor)
@@ -493,10 +494,11 @@ class MainActivity : ComponentActivity() {
         url.contains("weibo.com", true) || url.contains("weibo.cn", true) || url.contains("t.cn/", true) ||
             url.contains("douyin.com", true) || url.contains("iesdouyin.com", true) ||
             url.contains("bilibili.com", true) || url.contains("b23.tv", true) ||
-            TelegramLinkParser.isSupported(url) || XLinkParser.isSupported(url)
+            TelegramLinkParser.isSupported(url) || XLinkParser.isSupported(url) || InstagramLinkParser.isSupported(url)
 
     private fun adoptPlatformForUrl(url: String) {
         val target = when {
+            InstagramLinkParser.isSupported(url) -> Platform.INSTAGRAM
             XLinkParser.isSupported(url) -> Platform.X
             TelegramLinkParser.isSupported(url) -> Platform.TELEGRAM
             url.contains("bilibili.com", true) || url.contains("b23.tv", true) -> Platform.BILIBILI
@@ -524,6 +526,7 @@ class MainActivity : ComponentActivity() {
                     Platform.BILIBILI -> R.string.reading_bilibili
                     Platform.TELEGRAM -> R.string.reading_telegram
                     Platform.X -> R.string.reading_x
+                    Platform.INSTAGRAM -> R.string.reading_instagram
                 },
             ),
         )
@@ -550,6 +553,7 @@ class MainActivity : ComponentActivity() {
                     Platform.BILIBILI -> BilibiliClient(sessionCookie, this).loadPost(url)
                     Platform.TELEGRAM -> TelegramClient(this).loadPost(url)
                     Platform.X -> XClient(this).loadPost(url)
+                    Platform.INSTAGRAM -> InstagramClient(this).loadPost(url)
                     Platform.DOUYIN -> return@execute
                 }
                 runOnUiThread { handleLoadedPost(loaded) }
@@ -576,7 +580,7 @@ class MainActivity : ComponentActivity() {
         showMedia(loaded)
         val available = selectedUrls.size
         val summary = if (
-            platform in setOf(Platform.DOUYIN, Platform.BILIBILI, Platform.TELEGRAM, Platform.X) &&
+            platform in setOf(Platform.DOUYIN, Platform.BILIBILI, Platform.TELEGRAM, Platform.X, Platform.INSTAGRAM) &&
             loaded.creator?.id?.isNotBlank() == true
         ) {
             getString(R.string.identified_media_format, loaded.media.size, available)
@@ -633,6 +637,7 @@ class MainActivity : ComponentActivity() {
                     Platform.BILIBILI -> R.string.bilibili_read_failed
                     Platform.TELEGRAM -> R.string.telegram_read_failed
                     Platform.X -> R.string.x_read_failed
+                    Platform.INSTAGRAM -> R.string.instagram_read_failed
                 },
             ),
         )
@@ -894,6 +899,7 @@ class MainActivity : ComponentActivity() {
             Platform.BILIBILI -> BilibiliSession.cookieHeader()
             Platform.TELEGRAM -> ""
             Platform.X -> ""
+            Platform.INSTAGRAM -> ""
         }
     }
 

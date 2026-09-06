@@ -10,12 +10,14 @@
     <string name="bilibili_settings_title">哔哩哔哩设置</string>
     <string name="telegram_settings_title">Telegram 设置</string>
     <string name="x_settings_title">X 设置</string>
+    <string name="instagram_settings_title">Instagram 设置</string>
     <string name="paste_once">一键粘贴</string>
     <string name="link_hint">粘贴微博链接</string>
     <string name="douyin_link_hint">粘贴抖音分享链接</string>
     <string name="bilibili_link_hint">粘贴哔哩哔哩视频或图文链接</string>
     <string name="telegram_link_hint">粘贴 Telegram 公开频道消息链接</string>
     <string name="x_link_hint">粘贴 X / Twitter 帖子链接</string>
+    <string name="instagram_link_hint">粘贴 Instagram 帖子或 Reels 链接</string>
     <string name="link_helper">支持微博正文、视频组件页、移动分享链接和 t.cn 短链</string>
     <string name="recognize_media">识别媒体</string>
     <string name="recognition_results">识别结果</string>
@@ -68,6 +70,7 @@
     <string name="bilibili_account">哔哩哔哩账号</string>
     <string name="telegram_public_posts">Telegram 公开频道</string>
     <string name="x_public_posts">X 公开帖子</string>
+    <string name="instagram_public_posts">Instagram 公开帖子</string>
     <string name="douyin_settings">抖音下载</string>
     <string name="douyin_settings_no_login">抖音公开链接无需登录</string>
     <string name="checking_login">正在检查登录状态…</string>
@@ -104,7 +107,7 @@
     <string name="about_us">关于我们</string>
     <string name="about_weidownloader">关于 WeiDownloader</string>
     <string name="about_summary">功能说明、支持范围与隐私信息</string>
-    <string name="about_description">WeiDownloader 用于识别并保存受支持平台链接中的媒体，当前支持微博、抖音和哔哩哔哩。</string>
+    <string name="about_description">WeiDownloader 用于识别并保存受支持平台链接中的媒体，支持微博、抖音、哔哩哔哩、Telegram、X 和 Instagram。</string>
     <string name="supported_links">支持的链接</string>
     <string name="responsible_use">合理使用</string>
     <string name="privacy_and_storage">隐私与存储</string>
@@ -136,6 +139,7 @@
     <string name="reading_bilibili">正在读取该条哔哩哔哩作品…</string>
     <string name="reading_telegram">正在读取该条 Telegram 消息…</string>
     <string name="reading_x">正在读取该条 X 帖子…</string>
+    <string name="reading_instagram">正在读取该条 Instagram 内容…</string>
     <string name="identified_format">已识别 %1$d 个文件 · %2$d 个可下载 · %3$s</string>
     <string name="identified_media_format">已识别 %1$d 个文件 · %2$d 个可下载</string>
     <string name="read_failed">读取失败，请稍后重试。</string>
@@ -197,5 +201,13 @@
     <string name="x_http_error">X 数据源返回 HTTP %1$d。</string>
     <string name="x_empty_response">X 数据源返回了空内容，请稍后重试。</string>
     <string name="x_network_error">读取 X 失败：%1$s</string>
+    <string name="instagram_url_not_found">没有找到可识别的 Instagram 帖子或 Reels 链接。</string>
+    <string name="instagram_no_media">这条 Instagram 内容没有公开可下载的图片或视频。</string>
+    <string name="instagram_read_failed">读取 Instagram 失败，请确认内容公开且链接仍然有效。</string>
+    <string name="instagram_default_title">Instagram 帖子</string>
+    <string name="instagram_default_author">Instagram 用户</string>
+    <string name="instagram_http_error">Instagram 返回 HTTP %1$d。</string>
+    <string name="instagram_empty_response">Instagram 返回了空内容，请稍后重试。</string>
+    <string name="instagram_network_error">读取 Instagram 失败：%1$s</string>
     <string name="open_in_x">在 X 中查看</string>
 </resources>
