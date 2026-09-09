@@ -79,7 +79,7 @@
     <string name="login_bilibili">Sign in to Bilibili</string>
     <string name="login_again">Sign in again</string>
     <string name="login_active">Signed in. This session is only used to read posts you can access.</string>
-    <string name="login_inactive">Not signed in. Sign in before processing a Weibo post.</string>
+    <string name="login_inactive">Not signed in. Public posts still work; sign in to access more content available to your account.</string>
     <string name="douyin_login_active">Signed in. This session is used to load complete public creator posts.</string>
     <string name="douyin_login_inactive">Not signed in. Single posts still work; sign in to load complete creator posts.</string>
     <string name="bilibili_login_active">Signed in. Higher qualities and complete creator dynamics available to this account can be requested.</string>
@@ -157,7 +157,7 @@
     <string name="download_work_fallback_title">A post by %1$s</string>
     <string name="download_work_preparing">%1$d/%2$d complete · Preparing</string>
     <string name="download_work_progress">%1$d/%2$d complete · %3$d%%</string>
-    <string name="client_login_required">Sign in to Weibo in the app first.</string>
+    <string name="client_login_required">The public endpoint did not return this post. Sign in to Weibo in the app and try again.</string>
     <string name="default_author">Weibo user</string>
     <string name="no_media">No downloadable images, Live Photos, videos, or audio were found. The post may be restricted.</string>
     <string name="weibo_http_error">Weibo returned HTTP %1$d. Check your sign-in status.</string>

@@ -233,7 +233,13 @@ internal class WeiboWorkNormalizer(
             return
         }
         val playlistVariants = playbackVariants(mediaInfo.optJSONArray("playback_list"))
-        val videoVariants = playlistVariants.ifEmpty { collectDirectMediaVariants(mediaInfo, MediaType.VIDEO) }
+        val directVariants = MediaVariantSelector.rank(
+            MediaType.VIDEO,
+            (collectDirectMediaVariants(mediaInfo, MediaType.VIDEO) +
+                collectDirectMediaVariants(container, MediaType.VIDEO))
+                .distinctBy(MediaVariant::url),
+        )
+        val videoVariants = playlistVariants.ifEmpty { directVariants }
         val selectedVideo = chooseMediaVariant(videoVariants, quality)
         val directVideo = selectedVideo?.url ?: bestDirectVideo(mediaInfo, quality)
         directVideo?.let {
@@ -488,8 +494,9 @@ internal class WeiboWorkNormalizer(
             val url = urlValue(value)
             if (url != null && isMediaVariantUrl(field, url, type)) {
                 val meta = info?.optJSONObject("meta")
-                val width = positiveInt(info, meta, "width")
-                val height = positiveInt(info, meta, "height")
+                val (urlWidth, urlHeight) = mediaDimensionsFromUrl(url)
+                val width = positiveInt(info, meta, "width").takeIf { it > 0 } ?: urlWidth
+                val height = positiveInt(info, meta, "height").takeIf { it > 0 } ?: urlHeight
                 val bitrate = positiveLong(info, meta, "bitrate")
                 val label = firstTextOrEmpty(info, "quality_desc", "quality_label", "quality_name", "label", "name")
                 val quality = MediaVariantSelector.inferVideoQuality(field, label, url)
@@ -523,6 +530,13 @@ internal class WeiboWorkNormalizer(
             .removeSuffix("_url")
             .removeSuffix("_mp4")
             .replace('_', ' ')
+    }
+
+    private fun mediaDimensionsFromUrl(url: String): Pair<Int, Int> {
+        val match = MEDIA_DIMENSIONS_PATTERN.find(url) ?: return 0 to 0
+        val width = match.groupValues[1].toIntOrNull() ?: 0
+        val height = match.groupValues[2].toIntOrNull() ?: 0
+        return width to height
     }
 
     private fun positiveInt(primary: JSONObject?, secondary: JSONObject?, key: String): Int =
@@ -776,6 +790,7 @@ internal class WeiboWorkNormalizer(
 
     private companion object {
         const val IMAGE_VARIANT_ORIGINAL = "original"
+        val MEDIA_DIMENSIONS_PATTERN = Regex("(?:template=|/)(\\d{2,5})x(\\d{2,5})(?:[./?&]|$)", RegexOption.IGNORE_CASE)
         val THUMBNAIL_FIELDS = listOf(
             "page_pic", "pagePic", "page_pic_url", "pagePicUrl",
             "cover_image", "coverImage", "cover_image_url", "coverImageUrl",

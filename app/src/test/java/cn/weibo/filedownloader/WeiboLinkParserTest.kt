@@ -61,6 +61,7 @@ class WeiboLinkParserTest {
 
     @Test
     fun keepsExistingStatusFamiliesWorking() {
+        assertStatus("https://weibo.com/3304314095/5341164280481000", "5341164280481000")
         assertStatus("https://weibo.com/1353112775/5226684729265742", "5226684729265742")
         assertStatus("https://weibo.com/0/NvAbCd12E", "NvAbCd12E")
         assertStatus("https://m.weibo.cn/detail/5226684729265742", "5226684729265742")

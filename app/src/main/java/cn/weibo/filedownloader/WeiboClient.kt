@@ -37,17 +37,35 @@ class WeiboClient(
     }
 
     private fun loadStatusPost(id: String, sourceUrl: String, quality: QualityPreference): WeiboPost {
-        if (!cookie.contains("SUB=")) {
+        val signedIn = cookie.contains("SUB=")
+        val defaultAuthor = context.getString(R.string.default_author)
+        var lastFailure: Exception? = null
+        for (provider in statusProviders) {
+            val data = try {
+                provider.load(id)
+            } catch (error: Exception) {
+                lastFailure = error
+                null
+            } ?: continue
+            normalizer.normalizeStatus(data, id, quality, defaultAuthor)?.let { return it.toPost(sourceUrl) }
+
+            // Some status responses retain only the video object id while their
+            // signed media URL fields are temporarily empty. Resolve that object
+            // through the independent video-component providers before moving on.
+            statusVideoObjectId(data)?.let { objectId ->
+                try {
+                    val playInfo = loadVideoFromProviders(objectId)
+                    normalizer.normalizeVideoComponent(playInfo, objectId, quality, defaultAuthor)
+                        ?.let { return it.toPost(sourceUrl) }
+                } catch (error: Exception) {
+                    lastFailure = error
+                }
+            }
+        }
+        if (!signedIn) {
             throw WeiboLoginRequiredException(context.getString(R.string.client_login_required))
         }
-        val data = loadStatusFromProviders(id)
-        val work = normalizer.normalizeStatus(
-            data = data,
-            fallbackId = id,
-            quality = quality,
-            defaultAuthor = context.getString(R.string.default_author),
-        ) ?: throw WeiboException(context.getString(R.string.no_media))
-        return work.toPost(sourceUrl)
+        throw lastFailure ?: WeiboException(context.getString(R.string.no_media))
     }
 
     private fun loadVideoObject(objectId: String, sourceUrl: String, quality: QualityPreference): WeiboPost {
@@ -59,20 +77,6 @@ class WeiboClient(
             defaultAuthor = context.getString(R.string.default_author),
         ) ?: throw WeiboException(context.getString(R.string.no_media))
         return work.toPost(sourceUrl)
-    }
-
-    private fun loadStatusFromProviders(id: String): JSONObject {
-        var lastFailure: Exception? = null
-        for (provider in statusProviders) {
-            val detail = try {
-                provider.load(id)
-            } catch (error: Exception) {
-                lastFailure = error
-                null
-            }
-            if (detail != null) return detail
-        }
-        throw lastFailure ?: WeiboException(context.getString(R.string.post_not_returned))
     }
 
     private fun loadVideoFromProviders(objectId: String): JSONObject {
@@ -94,6 +98,13 @@ class WeiboClient(
         quality: QualityPreference,
         postId: String = data.optString("id"),
     ): List<MediaItem> = normalizer.parseMedia(data, quality, postId)
+
+    private fun statusVideoObjectId(data: JSONObject): String? = sequenceOf(
+        data.optJSONObject("page_info")?.optString("object_id"),
+        data.optString("object_id"),
+        data.optString("fid"),
+    ).mapNotNull { it?.trim()?.takeIf(String::isNotBlank) }
+        .firstOrNull { it.matches(Regex("[0-9]+:[A-Za-z0-9]+")) }
 
     private fun WeiboWorkData.toPost(sourceUrl: String): WeiboPost = WeiboPost(
         id = id,

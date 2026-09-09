@@ -138,6 +138,42 @@ class WeiboWorkNormalizerTest {
         assertEquals("https://wx1.sinaimg.cn/large/video-poster.jpg", media?.thumbnailUrl)
     }
 
+    @Test
+    fun readsNumericMidVideoFromSiblingUrlsWhenMediaInfoIsEmpty() {
+        val status = JSONObject(
+            """
+            {
+              "id": "5341164280481000",
+              "page_info": {
+                "type": "video",
+                "object_id": "1034:5341163884838960",
+                "page_pic": {
+                  "url": "https://wx3.sinaimg.cn/orj480/video-cover.jpg",
+                  "width": 480,
+                  "height": 945
+                },
+                "media_info": {
+                  "duration": 66.688
+                },
+                "urls": {
+                  "mp4_720p_mp4": "https://f.video.weibocdn.com/source.mp4?template=720x1416.24.0"
+                }
+              }
+            }
+            """.trimIndent(),
+        )
+
+        val media = normalizer()
+            .parseMedia(status, QualityPreference.HIGHEST, "5341164280481000")
+            .single()
+
+        assertEquals(MediaType.VIDEO, media.type)
+        assertEquals("https://f.video.weibocdn.com/source.mp4?template=720x1416.24.0", media.url)
+        assertEquals(720, media.variants.first().width)
+        assertEquals(1416, media.variants.first().height)
+        assertEquals("https://wx3.sinaimg.cn/orj480/video-cover.jpg", media.thumbnailUrl)
+    }
+
     private fun normalizer(includeLiveCover: Boolean = false) =
         WeiboWorkNormalizer(
             cookie = "",
