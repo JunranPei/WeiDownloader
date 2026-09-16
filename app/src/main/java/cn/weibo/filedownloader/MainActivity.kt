@@ -367,6 +367,8 @@ class MainActivity : ComponentActivity() {
                 Platform.TELEGRAM -> R.string.telegram_link_hint
                 Platform.X -> R.string.x_link_hint
                 Platform.INSTAGRAM -> R.string.instagram_link_hint
+                Platform.XIAOHONGSHU -> R.string.xiaohongshu_link_hint
+                Platform.REDDIT -> R.string.reddit_link_hint
             },
         )
         val prefixColor = ContextCompat.getColor(this, platform.prefixColor)
@@ -503,10 +505,13 @@ class MainActivity : ComponentActivity() {
             url.contains("bilibili.com", true) || url.contains("b23.tv", true) ||
             (Platform.TELEGRAM.enabled && TelegramLinkParser.isSupported(url)) ||
             XLinkParser.isSupported(url) || InstagramLinkParser.isSupported(url)
+            || XiaohongshuLinkParser.isSupported(url) || RedditLinkParser.isSupported(url)
 
     private fun adoptPlatformForUrl(url: String) {
         val target = when {
             InstagramLinkParser.isSupported(url) -> Platform.INSTAGRAM
+            XiaohongshuLinkParser.isSupported(url) -> Platform.XIAOHONGSHU
+            RedditLinkParser.isSupported(url) -> Platform.REDDIT
             XLinkParser.isSupported(url) -> Platform.X
             Platform.TELEGRAM.enabled && TelegramLinkParser.isSupported(url) -> Platform.TELEGRAM
             url.contains("bilibili.com", true) || url.contains("b23.tv", true) -> Platform.BILIBILI
@@ -535,6 +540,8 @@ class MainActivity : ComponentActivity() {
                     Platform.TELEGRAM -> R.string.reading_telegram
                     Platform.X -> R.string.reading_x
                     Platform.INSTAGRAM -> R.string.reading_instagram
+                    Platform.XIAOHONGSHU -> R.string.reading_xiaohongshu
+                    Platform.REDDIT -> R.string.reading_reddit
                 },
             ),
         )
@@ -562,6 +569,8 @@ class MainActivity : ComponentActivity() {
                     Platform.TELEGRAM -> TelegramClient(this).loadPost(url)
                     Platform.X -> XClient(this).loadPost(url)
                     Platform.INSTAGRAM -> InstagramClient(this).loadPost(url)
+                    Platform.XIAOHONGSHU -> XiaohongshuClient(this).loadPost(url)
+                    Platform.REDDIT -> RedditClient(this).loadPost(url)
                     Platform.DOUYIN -> return@execute
                 }
                 runOnUiThread { handleLoadedPost(loaded) }
@@ -588,7 +597,7 @@ class MainActivity : ComponentActivity() {
         showMedia(loaded)
         val available = selectedUrls.size
         val summary = if (
-            platform in setOf(Platform.DOUYIN, Platform.BILIBILI, Platform.TELEGRAM, Platform.X, Platform.INSTAGRAM) &&
+            platform in setOf(Platform.DOUYIN, Platform.BILIBILI, Platform.TELEGRAM, Platform.X, Platform.INSTAGRAM, Platform.XIAOHONGSHU, Platform.REDDIT) &&
             loaded.creator?.id?.isNotBlank() == true
         ) {
             getString(R.string.identified_media_format, loaded.media.size, available)
@@ -646,6 +655,8 @@ class MainActivity : ComponentActivity() {
                     Platform.TELEGRAM -> R.string.telegram_read_failed
                     Platform.X -> R.string.x_read_failed
                     Platform.INSTAGRAM -> R.string.instagram_read_failed
+                    Platform.XIAOHONGSHU -> R.string.xiaohongshu_read_failed
+                    Platform.REDDIT -> R.string.reddit_read_failed
                 },
             ),
         )
@@ -908,6 +919,8 @@ class MainActivity : ComponentActivity() {
             Platform.TELEGRAM -> ""
             Platform.X -> ""
             Platform.INSTAGRAM -> ""
+            Platform.XIAOHONGSHU -> ""
+            Platform.REDDIT -> ""
         }
     }
 

@@ -58,6 +58,22 @@ enum class Platform(
         R.color.platform_instagram,
         R.color.platform_instagram_on_action,
     ),
+    XIAOHONGSHU(
+        "xiaohongshu",
+        "Red",
+        "Xiaohongshu",
+        R.color.platform_xiaohongshu,
+        R.color.platform_xiaohongshu,
+        R.color.platform_xiaohongshu_on_action,
+    ),
+    REDDIT(
+        "reddit",
+        "Reddit",
+        "Reddit",
+        R.color.platform_reddit,
+        R.color.platform_reddit,
+        R.color.platform_reddit_on_action,
+    ),
 
     ;
 

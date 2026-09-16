@@ -87,6 +87,8 @@ class DouyinCreatorActivity : Activity() {
                     Platform.TELEGRAM -> "https://t.me/$creatorId"
                     Platform.X -> "https://x.com/$creatorId"
                     Platform.INSTAGRAM -> "https://www.instagram.com/$creatorId/"
+                    Platform.XIAOHONGSHU -> "https://www.xiaohongshu.com/user/profile/$creatorId"
+                    Platform.REDDIT -> "https://www.reddit.com/user/$creatorId/"
                     Platform.WEIBO -> ""
                 }
             },
@@ -505,6 +507,8 @@ class DouyinCreatorActivity : Activity() {
                 Platform.TELEGRAM -> ""
                 Platform.X -> ""
                 Platform.INSTAGRAM -> ""
+                Platform.XIAOHONGSHU -> ""
+                Platform.REDDIT -> ""
                 Platform.WEIBO -> ""
             }
             quickDownloadQueued += DownloadDispatcher(this, cookie, creator.platform)

@@ -93,6 +93,8 @@ class DownloadDispatcher(
             Platform.TELEGRAM -> "https://t.me/"
             Platform.X -> "https://x.com/"
             Platform.INSTAGRAM -> "https://www.instagram.com/"
+            Platform.XIAOHONGSHU -> "https://www.xiaohongshu.com/"
+            Platform.REDDIT -> "https://www.reddit.com/"
         }
 }
 

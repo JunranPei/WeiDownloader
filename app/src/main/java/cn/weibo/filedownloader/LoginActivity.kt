@@ -61,6 +61,8 @@ class LoginActivity : Activity() {
                     Platform.TELEGRAM -> TELEGRAM_LOGIN_URL
                     Platform.X -> X_LOGIN_URL
                     Platform.INSTAGRAM -> INSTAGRAM_LOGIN_URL
+                    Platform.XIAOHONGSHU -> "https://www.xiaohongshu.com/"
+                    Platform.REDDIT -> "https://www.reddit.com/"
                 },
             )
         }
@@ -102,6 +104,8 @@ class LoginActivity : Activity() {
             Platform.TELEGRAM -> false
             Platform.X -> false
             Platform.INSTAGRAM -> false
+            Platform.XIAOHONGSHU -> false
+            Platform.REDDIT -> false
         }
         doneButton.setText(if (signedIn) R.string.login_done_ready else R.string.login_done_waiting)
     }

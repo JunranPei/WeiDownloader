@@ -210,4 +210,22 @@
     <string name="instagram_empty_response">Instagram returned an empty response. Try again shortly.</string>
     <string name="instagram_network_error">Could not read Instagram: %1$s</string>
     <string name="open_in_x">View on X</string>
+    <string name="xiaohongshu_link_hint">Paste a Xiaohongshu share link</string>
+    <string name="reading_xiaohongshu">Reading this Xiaohongshu note…</string>
+    <string name="xiaohongshu_url_not_found">No recognizable Xiaohongshu link was found.</string>
+    <string name="xiaohongshu_no_media">This Xiaohongshu note has no downloadable image or video.</string>
+    <string name="xiaohongshu_read_failed">Could not read Xiaohongshu. Check that the link is public and still available.</string>
+    <string name="xiaohongshu_default_title">Xiaohongshu note</string>
+    <string name="xiaohongshu_default_author">Xiaohongshu user</string>
+    <string name="xiaohongshu_http_error">Xiaohongshu returned HTTP %1$d.</string>
+    <string name="xiaohongshu_network_error">Could not read Xiaohongshu: %1$s</string>
+    <string name="reddit_link_hint">Paste a Reddit post link</string>
+    <string name="reading_reddit">Reading this Reddit post…</string>
+    <string name="reddit_url_not_found">No recognizable Reddit post link was found.</string>
+    <string name="reddit_no_media">This Reddit post has no downloadable image or video.</string>
+    <string name="reddit_read_failed">Could not read Reddit. Check that the post is public and still available.</string>
+    <string name="reddit_default_title">Reddit post</string>
+    <string name="reddit_default_author">Reddit user</string>
+    <string name="reddit_http_error">Reddit returned HTTP %1$d.</string>
+    <string name="reddit_network_error">Could not read Reddit: %1$s</string>
 </resources>

@@ -115,6 +115,8 @@ class SettingsActivity : ComponentActivity() {
                 Platform.TELEGRAM -> R.string.telegram_settings_title
                 Platform.X -> R.string.x_settings_title
                 Platform.INSTAGRAM -> R.string.instagram_settings_title
+                Platform.XIAOHONGSHU -> R.string.xiaohongshu_default_title
+                Platform.REDDIT -> R.string.reddit_default_title
             },
         )
         val accountSectionTitle = findViewById<TextView>(R.id.settingsPlatformSectionTitle)
@@ -126,9 +128,11 @@ class SettingsActivity : ComponentActivity() {
                 Platform.TELEGRAM -> R.string.telegram_public_posts
                 Platform.X -> R.string.x_public_posts
                 Platform.INSTAGRAM -> R.string.instagram_public_posts
+                Platform.XIAOHONGSHU -> R.string.xiaohongshu_default_title
+                Platform.REDDIT -> R.string.reddit_default_title
             },
         )
-        val accountVisibility = if (platform in setOf(Platform.TELEGRAM, Platform.X, Platform.INSTAGRAM)) View.GONE else View.VISIBLE
+        val accountVisibility = if (platform in setOf(Platform.TELEGRAM, Platform.X, Platform.INSTAGRAM, Platform.XIAOHONGSHU, Platform.REDDIT)) View.GONE else View.VISIBLE
         accountSectionTitle.visibility = accountVisibility
         findViewById<View>(R.id.settingsPlatformAccountCard).visibility = accountVisibility
     }
@@ -287,6 +291,8 @@ class SettingsActivity : ComponentActivity() {
             Platform.TELEGRAM -> Unit
             Platform.X -> Unit
             Platform.INSTAGRAM -> Unit
+            Platform.XIAOHONGSHU -> Unit
+            Platform.REDDIT -> Unit
         }
     }
 

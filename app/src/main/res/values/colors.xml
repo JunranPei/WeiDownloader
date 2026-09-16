@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="platform_weibo">#E6162D</color>
-    <color name="platform_weibo_on_action">#FFFFFF</color>
+    <color name="platform_weibo">#FF8200</color>
+    <color name="platform_weibo_on_action">#351900</color>
     <color name="platform_douyin_cyan">#25F4EE</color>
     <color name="platform_douyin_black">#111115</color>
     <color name="platform_douyin_on_action">#FFFFFF</color>
@@ -13,6 +13,10 @@
     <color name="platform_x_on_action">#FFFFFF</color>
     <color name="platform_instagram">#C13584</color>
     <color name="platform_instagram_on_action">#FFFFFF</color>
+    <color name="platform_xiaohongshu">#C72C63</color>
+    <color name="platform_xiaohongshu_on_action">#FFFFFF</color>
+    <color name="platform_reddit">#FF4500</color>
+    <color name="platform_reddit_on_action">#FFFFFF</color>
     <color name="platform_neutral">#56423A</color>
     <color name="md_theme_primary">#B84F00</color>
     <color name="md_theme_onPrimary">#FFFFFF</color>
