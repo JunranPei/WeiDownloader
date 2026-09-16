@@ -51,8 +51,14 @@ data class MediaItem(
 
     fun suggestedFileName(): String {
         val extension = runCatching {
-            val path = URI(url).path ?: ""
-            path.substringAfterLast('.', "")
+            val uri = URI(url)
+            val pathExtension = uri.path.orEmpty().substringAfterLast('.', "")
+            val queryFormat = Regex("(?:^|[/&])format[/=](jpg|jpeg|png|webp|heic|heif|avif)(?:[/&]|$)", RegexOption.IGNORE_CASE)
+                .find(uri.rawQuery.orEmpty())
+                ?.groupValues
+                ?.getOrNull(1)
+                .orEmpty()
+            pathExtension.ifBlank { queryFormat }
         }.getOrDefault("").lowercase()
         val safeExtension = extension.takeIf { MediaFileTypes.acceptsExtension(type, it) }
             ?: MediaFileTypes.defaultExtension(type)

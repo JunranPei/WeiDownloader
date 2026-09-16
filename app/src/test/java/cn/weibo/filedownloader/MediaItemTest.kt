@@ -22,6 +22,11 @@ class MediaItemTest {
         "image_123_01.jpg", media(MediaType.IMAGE, "https://example.com/source.mp4").suggestedFileName(),
     )
 
+    @Test fun imageFormatInTransformQueryIsUsedAsExtension() = assertEquals(
+        "image_123_01.png",
+        media(MediaType.IMAGE, "https://example.com/source?imageView2/format/png").suggestedFileName(),
+    )
+
     @Test fun imagePathIsNotAcceptedAsVideoPath() {
         assertTrue(MediaFileTypes.isKnownImagePath("/poster.jpg"))
         assertFalse(MediaFileTypes.isKnownVideoPath("/poster.jpg"))

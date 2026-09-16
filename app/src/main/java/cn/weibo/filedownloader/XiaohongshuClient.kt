@@ -52,7 +52,10 @@ internal object XiaohongshuPageNormalizer {
         val user = note.optJSONObject("user") ?: JSONObject()
         val author = user.optString("nickName").ifBlank { user.optString("nickname") }
         val images = parseImages(note.optJSONArray("imageList"), id)
-        val videos = parseVideos(note.optJSONObject("video"), id, images.firstOrNull()?.url.orEmpty())
+        val videoThumbnailUrl = images.firstOrNull()?.let { image ->
+            image.thumbnailUrl.ifBlank { image.url }
+        }.orEmpty()
+        val videos = parseVideos(note.optJSONObject("video"), id, videoThumbnailUrl)
         val media = if (videos.isNotEmpty()) videos else images
         if (media.isEmpty()) return null
         return XiaohongshuPostData(
@@ -80,20 +83,44 @@ internal object XiaohongshuPageNormalizer {
             val image = values.optJSONObject(index) ?: continue
             val width = image.optInt("width")
             val height = image.optInt("height")
-            val candidates = buildList {
-                val info = image.optJSONArray("infoList")
-                if (info != null) for (position in 0 until info.length()) {
-                    val item = info.optJSONObject(position) ?: continue
-                    val url = secureUrl(item.optString("url"))
-                    if (url.isNotBlank()) add(MediaVariant(item.optString("imageScene").ifBlank { "image" }, url, width, height))
-                }
-                secureUrl(image.optString("url")).takeIf(String::isNotBlank)?.let {
-                    add(MediaVariant("original", it, width, height))
-                }
-            }.distinctBy(MediaVariant::url)
-            val selected = candidates.firstOrNull { it.key == "H5_DTL" } ?: candidates.firstOrNull() ?: continue
-            add(MediaItem(MediaType.IMAGE, selected.url, MediaQuality.ORIGINAL_BEST, postId, size + 1, variants = candidates, selectedVariantKey = selected.key))
+            val previewUrl = image.optJSONArray("infoList")?.let { info ->
+                (0 until info.length()).asSequence()
+                    .mapNotNull { info.optJSONObject(it) }
+                    .firstOrNull { it.optString("imageScene") == "H5_DTL" }
+                    ?.optString("url")
+            }.orEmpty().ifBlank { image.optString("url") }.let(::secureUrl)
+            val fileId = image.optString("fileId").trim().trimStart('/')
+            val originalUrl = originalImageUrl(fileId, previewUrl)
+            val selectedUrl = originalUrl.ifBlank { previewUrl }
+            if (selectedUrl.isBlank()) continue
+            val variant = MediaVariant(
+                key = if (originalUrl.isNotBlank()) "original" else "web",
+                url = selectedUrl,
+                width = if (originalUrl.isNotBlank()) width else 0,
+                height = if (originalUrl.isNotBlank()) height else 0,
+            )
+            add(
+                MediaItem(
+                    type = MediaType.IMAGE,
+                    url = selectedUrl,
+                    quality = MediaQuality.ORIGINAL_BEST,
+                    postId = postId,
+                    ordinal = size + 1,
+                    thumbnailUrl = previewUrl,
+                    variants = listOf(variant),
+                    selectedVariantKey = variant.key,
+                ),
+            )
         }
+    }
+
+    private fun originalImageUrl(fileId: String, previewUrl: String): String {
+        if (fileId.isBlank()) return ""
+        val host = runCatching { URI(previewUrl).host.orEmpty() }.getOrDefault("")
+            .replace("sns-webpic", "sns-img")
+            .takeIf { it.endsWith(".xhscdn.com") }
+            ?: "sns-img-qc.xhscdn.com"
+        return "https://$host/$fileId?imageView2/format/png"
     }
 
     private fun parseVideos(video: JSONObject?, postId: String, thumbnailUrl: String): List<MediaItem> {
