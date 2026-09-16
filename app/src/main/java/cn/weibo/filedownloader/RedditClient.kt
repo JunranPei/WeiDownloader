@@ -130,7 +130,7 @@ class RedditClient(private val context: Context) {
             instanceFollowRedirects = true
             connectTimeout = 15_000
             readTimeout = 25_000
-            setRequestProperty("User-Agent", "WeiDownloader/1.0 (Android media downloader)")
+            setRequestProperty("User-Agent", "AllDownloader/1.0 (Android media downloader)")
             setRequestProperty("Accept", "application/json")
         }
         try {

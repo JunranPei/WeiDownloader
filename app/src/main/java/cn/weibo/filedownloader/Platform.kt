@@ -60,7 +60,7 @@ enum class Platform(
     ),
     XIAOHONGSHU(
         "xiaohongshu",
-        "Red",
+        "RedNote",
         "Xiaohongshu",
         R.color.platform_xiaohongshu,
         R.color.platform_xiaohongshu,

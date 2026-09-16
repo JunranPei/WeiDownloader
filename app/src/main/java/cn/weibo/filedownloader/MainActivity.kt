@@ -7,6 +7,10 @@ import android.content.Intent
 import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.graphics.Color
+import android.graphics.LinearGradient
+import android.graphics.Shader
+import android.graphics.drawable.GradientDrawable
+import android.graphics.drawable.RippleDrawable
 import android.os.Build
 import android.os.Bundle
 import android.view.KeyEvent
@@ -375,6 +379,7 @@ class MainActivity : ComponentActivity() {
         val actionColor = ContextCompat.getColor(this, platform.actionColor)
         val onActionColor = ContextCompat.getColor(this, platform.onActionColor)
         platformPrefix.text = platform.shortName
+        platformPrefix.paint.shader = null
         val downloaderTitle = mainPage.findViewById<TextView>(R.id.downloaderTitle)
         downloaderTitle.text = getString(R.string.brand_downloader)
         if (platform == Platform.DOUYIN) {
@@ -389,6 +394,22 @@ class MainActivity : ComponentActivity() {
             platformPrefix.setShadowLayer(0.01f, shadowOffset, 0f, prefixColor)
             downloaderTitle.setTextColor(themedColor(com.google.android.material.R.attr.colorOnSurface))
             downloaderTitle.setShadowLayer(0f, 0f, 0f, Color.TRANSPARENT)
+        } else if (platform == Platform.INSTAGRAM) {
+            val width = platformPrefix.paint.measureText(platform.shortName).coerceAtLeast(1f)
+            platformPrefix.setTextColor(Color.WHITE)
+            platformPrefix.paint.shader = LinearGradient(
+                0f,
+                0f,
+                width,
+                0f,
+                INSTAGRAM_GRADIENT_COLORS,
+                null,
+                Shader.TileMode.CLAMP,
+            )
+            platformPrefix.setShadowLayer(0f, 0f, 0f, Color.TRANSPARENT)
+            platformPrefix.invalidate()
+            downloaderTitle.setTextColor(themedColor(com.google.android.material.R.attr.colorOnSurface))
+            downloaderTitle.setShadowLayer(0f, 0f, 0f, Color.TRANSPARENT)
         } else {
             platformPrefix.setTextColor(prefixColor)
             platformPrefix.setShadowLayer(0f, 0f, 0f, Color.TRANSPARENT)
@@ -396,15 +417,36 @@ class MainActivity : ComponentActivity() {
             downloaderTitle.setShadowLayer(0f, 0f, 0f, Color.TRANSPARENT)
         }
         brandSwitcher.contentDescription = getString(R.string.switch_platform)
-        parseButton.backgroundTintList = ColorStateList.valueOf(actionColor)
+        applyPlatformButtonBackgrounds(platform, actionColor, prefixColor)
         parseButton.iconTint = ColorStateList.valueOf(onActionColor)
-        downloadButton.backgroundTintList = ColorStateList.valueOf(actionColor)
         downloadButton.setTextColor(onActionColor)
         val douyinStroke = if (platform == Platform.DOUYIN) dpInt(1) else 0
         parseButton.strokeWidth = douyinStroke
         parseButton.strokeColor = ColorStateList.valueOf(prefixColor)
         downloadButton.strokeWidth = douyinStroke
         downloadButton.strokeColor = ColorStateList.valueOf(prefixColor)
+    }
+
+    private fun applyPlatformButtonBackgrounds(platform: Platform, actionColor: Int, strokeColor: Int) {
+        val colors = if (platform == Platform.INSTAGRAM) INSTAGRAM_GRADIENT_COLORS else intArrayOf(actionColor, actionColor)
+        val strokeWidth = if (platform == Platform.DOUYIN) dpInt(1) else 0
+        parseButton.backgroundTintList = null
+        downloadButton.backgroundTintList = null
+        parseButton.background = platformButtonBackground(dpInt(26).toFloat(), colors, strokeWidth, strokeColor)
+        downloadButton.background = platformButtonBackground(dpInt(24).toFloat(), colors, strokeWidth, strokeColor)
+    }
+
+    private fun platformButtonBackground(radius: Float, colors: IntArray, strokeWidth: Int, strokeColor: Int): RippleDrawable {
+        val content = GradientDrawable(GradientDrawable.Orientation.LEFT_RIGHT, colors).apply {
+            cornerRadius = radius
+            if (strokeWidth > 0) setStroke(strokeWidth, strokeColor)
+        }
+        val mask = GradientDrawable().apply {
+            shape = GradientDrawable.RECTANGLE
+            setColor(Color.WHITE)
+            cornerRadius = radius
+        }
+        return RippleDrawable(ColorStateList.valueOf(0x33FFFFFF), content, mask)
     }
 
     private fun themedColor(attribute: Int): Int {
@@ -971,6 +1013,11 @@ class MainActivity : ComponentActivity() {
     private fun toast(value: String) = Toast.makeText(this, value, Toast.LENGTH_SHORT).show()
 
     companion object {
+        private val INSTAGRAM_GRADIENT_COLORS = intArrayOf(
+            Color.rgb(131, 58, 180),
+            Color.rgb(253, 29, 29),
+            Color.rgb(252, 175, 69),
+        )
         const val ACTION_OPEN_CREATOR_WORK = "cn.weibo.filedownloader.action.OPEN_CREATOR_WORK"
         const val EXTRA_CREATOR_WORK_URL = "creator_work_url"
         private const val STATE_PLATFORM = "state_platform"

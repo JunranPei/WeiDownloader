@@ -14,7 +14,7 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "WeiboFileDownloader"
+rootProject.name = "AllDownloader"
 include(":app")
 include(":wei-carousel")
 project(":wei-carousel").projectDir = file("carousel-library")

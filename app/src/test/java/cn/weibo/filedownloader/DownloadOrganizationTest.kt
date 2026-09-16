@@ -20,7 +20,7 @@ class DownloadOrganizationTest {
         assertEquals(Platform.entries.size, folders.distinct().size)
         assertEquals(Platform.entries.size, preferences.distinct().size)
         Platform.entries.zip(folders).forEach { (platform, folder) ->
-            assertEquals("WeiDownloader/${platform.downloadFolderName}", folder)
+            assertEquals("AllDownloader/${platform.downloadFolderName}", folder)
         }
     }
 
@@ -35,10 +35,10 @@ class DownloadOrganizationTest {
             )
 
             assertEquals(
-                "WeiDownloader/${platform.downloadFolderName}/author_name_post_1",
+                "AllDownloader/${platform.downloadFolderName}/author_name_post_1",
                 folder,
             )
-            assertTrue(folder.startsWith("WeiDownloader/${platform.downloadFolderName}/"))
+            assertTrue(folder.startsWith("AllDownloader/${platform.downloadFolderName}/"))
         }
     }
 }

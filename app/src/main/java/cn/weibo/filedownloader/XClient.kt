@@ -203,7 +203,7 @@ internal class XHttpClient(private val context: Context) {
             instanceFollowRedirects = true
             connectTimeout = 20_000
             readTimeout = 30_000
-            setRequestProperty("User-Agent", "WeiDownloader Android")
+            setRequestProperty("User-Agent", "AllDownloader Android")
             setRequestProperty("Accept", "application/json")
             setRequestProperty("Accept-Encoding", "identity")
         }

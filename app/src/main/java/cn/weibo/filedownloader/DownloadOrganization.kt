@@ -6,7 +6,7 @@ object DownloadOrganization {
     const val PREFERENCE = "download_organization"
     const val SINGLE_FOLDER = "single_folder"
     const val PER_POST_FOLDER = "per_post_folder"
-    const val ROOT_FOLDER = "WeiDownloader"
+    const val ROOT_FOLDER = "AllDownloader"
 
     fun folderName(context: Context, platform: Platform, author: String, postId: String): String {
         val mode = context.getSharedPreferences("downloader_settings", Context.MODE_PRIVATE)
