@@ -136,6 +136,8 @@ class MainActivity : ComponentActivity() {
         }
         image.load(thumbnailUrl) {
             crossfade(false)
+            memoryCachePolicy(coil.request.CachePolicy.ENABLED)
+            diskCachePolicy(coil.request.CachePolicy.ENABLED)
             placeholder(null)
             error(null)
             listener(
@@ -734,9 +736,12 @@ class MainActivity : ComponentActivity() {
             val width = viewport.coerceAtLeast(dp(280))
             row.layoutParams = LinearLayout.LayoutParams(width, width)
             */
+            // Never use an original image as the first-view preview. XHS originals
+            // are often several megabytes and can block the whole carousel on the
+            // first visit; the thumbnail is already the platform's display-sized URL.
             val preview = when {
-                item.type == MediaType.IMAGE && item.url.isNotBlank() -> item.url
                 item.thumbnailUrl.isNotBlank() -> item.thumbnailUrl
+                item.type == MediaType.IMAGE -> item.url
                 else -> ""
             }
             CarouselMediaItem(

@@ -37,6 +37,7 @@ class DouyinCreatorActivity : Activity() {
     private lateinit var bilibiliRepository: BilibiliCreatorRepository
     private lateinit var telegramRepository: TelegramCreatorRepository
     private lateinit var xRepository: XCreatorRepository
+    private lateinit var xiaohongshuRepository: XiaohongshuCreatorRepository
     private var webLoader: DouyinCreatorWebLoader? = null
     private var bilibiliWebLoader: BilibiliCreatorWebLoader? = null
     private lateinit var creator: CreatorProfile
@@ -59,6 +60,7 @@ class DouyinCreatorActivity : Activity() {
     private var bilibiliOffset = ""
     private var telegramBefore = ""
     private var xCursor = ""
+    private var xiaohongshuLoaded = false
     private var hasMore = true
     private var loading = false
     private var usingWebFallback = false
@@ -100,6 +102,7 @@ class DouyinCreatorActivity : Activity() {
         bilibiliRepository = BilibiliCreatorRepository(this)
         telegramRepository = TelegramCreatorRepository(this)
         xRepository = XCreatorRepository(this)
+        xiaohongshuRepository = XiaohongshuCreatorRepository(this)
         WindowCompat.setDecorFitsSystemWindows(window, false)
         configureTransparentSystemBars()
         setContentView(R.layout.activity_douyin_creator)
@@ -140,6 +143,7 @@ class DouyinCreatorActivity : Activity() {
                 bilibiliOffset = ""
                 telegramBefore = ""
                 xCursor = ""
+                xiaohongshuLoaded = false
                 hasMore = true
                 if (creator.platform == Platform.BILIBILI && usingBilibiliWebFallback) {
                     loading = true
@@ -162,6 +166,7 @@ class DouyinCreatorActivity : Activity() {
                     Platform.BILIBILI -> R.string.open_in_bilibili
                     Platform.TELEGRAM -> R.string.open_in_telegram
                     Platform.X -> R.string.open_in_x
+                    Platform.XIAOHONGSHU -> R.string.open_in_xiaohongshu
                     else -> R.string.open_in_douyin
                 },
             )
@@ -195,6 +200,10 @@ class DouyinCreatorActivity : Activity() {
             loadMoreFromBilibili()
             return
         }
+        if (creator.platform == Platform.XIAOHONGSHU) {
+            loadMoreFromXiaohongshu()
+            return
+        }
         loading = true
         if (adapter.itemCount == 0) showLoading()
         if (!usingWebFallback && adapter.itemCount == 0 && DouyinSession.isSignedIn()) {
@@ -220,6 +229,19 @@ class DouyinCreatorActivity : Activity() {
                         startWebFallback()
                     },
                 )
+            }
+        }
+    }
+
+    private fun loadMoreFromXiaohongshu() {
+        if (xiaohongshuLoaded) return
+        loading = true
+        if (adapter.itemCount == 0) showLoading()
+        executor.execute {
+            val result = runCatching { xiaohongshuRepository.loadPage(creator) }
+            runOnUiThread {
+                loading = false; xiaohongshuLoaded = true
+                result.fold({ page -> bindCreator(page.creator); adapter.append(page.works); hasMore = false; if (adapter.itemCount > 0) state.visibility = View.GONE else showMessage(R.string.creator_empty, false) }, { hasMore = false; showMessage(R.string.creator_load_failed, true) })
             }
         }
     }
@@ -643,6 +665,8 @@ private class CreatorWorksAdapter(
         val item = items[position]
         holder.cover.load(item.coverUrl.takeIf(String::isNotBlank)) {
             crossfade(true)
+            memoryCachePolicy(coil.request.CachePolicy.ENABLED)
+            diskCachePolicy(coil.request.CachePolicy.ENABLED)
             placeholder(R.drawable.ic_media_placeholder)
             error(R.drawable.ic_media_placeholder)
         }

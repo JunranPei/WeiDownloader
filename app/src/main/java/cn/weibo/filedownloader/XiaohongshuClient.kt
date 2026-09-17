@@ -93,12 +93,13 @@ internal object XiaohongshuPageNormalizer {
             val originalUrl = originalImageUrl(fileId, previewUrl)
             val selectedUrl = originalUrl.ifBlank { previewUrl }
             if (selectedUrl.isBlank()) continue
-            val variant = MediaVariant(
-                key = if (originalUrl.isNotBlank()) "original" else "web",
-                url = selectedUrl,
-                width = if (originalUrl.isNotBlank()) width else 0,
-                height = if (originalUrl.isNotBlank()) height else 0,
-            )
+            val variants = buildList {
+                if (originalUrl.isNotBlank()) add(MediaVariant("original", originalUrl, width, height))
+                if (previewUrl.isNotBlank() && previewUrl != originalUrl) {
+                    add(MediaVariant("web", previewUrl))
+                }
+            }
+            val variant = variants.firstOrNull() ?: continue
             add(
                 MediaItem(
                     type = MediaType.IMAGE,
@@ -107,7 +108,7 @@ internal object XiaohongshuPageNormalizer {
                     postId = postId,
                     ordinal = size + 1,
                     thumbnailUrl = previewUrl,
-                    variants = listOf(variant),
+                    variants = variants,
                     selectedVariantKey = variant.key,
                 ),
             )
@@ -120,7 +121,7 @@ internal object XiaohongshuPageNormalizer {
             .replace("sns-webpic", "sns-img")
             .takeIf { it.endsWith(".xhscdn.com") }
             ?: "sns-img-qc.xhscdn.com"
-        return "https://$host/$fileId?imageView2/format/png"
+        return "https://$host/$fileId"
     }
 
     private fun parseVideos(video: JSONObject?, postId: String, thumbnailUrl: String): List<MediaItem> {
@@ -134,15 +135,31 @@ internal object XiaohongshuPageNormalizer {
 
     private fun collectVideoUrls(value: Any?, result: MutableList<MediaVariant>, key: String = "video") {
         when (value) {
-            is JSONObject -> value.keys().forEach { childKey -> collectVideoUrls(value.opt(childKey), result, childKey) }
+            is JSONObject -> {
+                val width = value.optInt("width")
+                val height = value.optInt("height")
+                val bitrate = value.optLong("bitrate", value.optLong("bit_rate", 0L))
+                value.keys().forEach { childKey -> collectVideoUrls(value.opt(childKey), result, childKey) }
+                value.optString("url").takeIf { it.isNotBlank() }?.let { url ->
+                    val normalized = secureUrl(url)
+                    if (isVideoUrl(normalized, key)) result += MediaVariant(key.ifBlank { "video" }, normalized, width, height, bitrate)
+                }
+            }
             is JSONArray -> for (index in 0 until value.length()) collectVideoUrls(value.opt(index), result, key)
             is String -> {
                 val url = secureUrl(value)
-                if (url.startsWith("https://") && (key.contains("url", true) || url.contains(".mp4", true))) {
+                if (url.startsWith("https://") && isVideoUrl(url, key)) {
                     result += MediaVariant(key.ifBlank { "video" }, url)
                 }
             }
         }
+    }
+
+    private fun isVideoUrl(url: String, key: String): Boolean {
+        val path = runCatching { URI(url).path.orEmpty().lowercase() }.getOrDefault("")
+        return path.endsWith(".mp4") || path.endsWith(".mov") || path.endsWith(".m4v") ||
+            path.endsWith(".webm") || key.contains("video", true) || key.contains("stream", true) ||
+            key.contains("play", true) || key.contains("master", true) || key.contains("h264", true)
     }
 
     private fun secureUrl(value: String): String = value

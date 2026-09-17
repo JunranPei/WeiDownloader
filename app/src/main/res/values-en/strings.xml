@@ -210,6 +210,7 @@
     <string name="instagram_empty_response">Instagram returned an empty response. Try again shortly.</string>
     <string name="instagram_network_error">Could not read Instagram: %1$s</string>
     <string name="open_in_x">View on X</string>
+    <string name="open_in_xiaohongshu">View on Xiaohongshu</string>
     <string name="xiaohongshu_link_hint">Paste a Xiaohongshu share link</string>
     <string name="reading_xiaohongshu">Reading this Xiaohongshu note…</string>
     <string name="xiaohongshu_url_not_found">No recognizable Xiaohongshu link was found.</string>

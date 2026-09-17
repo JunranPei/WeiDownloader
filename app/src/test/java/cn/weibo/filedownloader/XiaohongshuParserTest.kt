@@ -23,14 +23,12 @@ class XiaohongshuParserTest {
         assertEquals("東申未来", post.author)
         assertEquals(1, post.media.size)
         val media = post.media.single()
-        assertEquals(
-            "https://sns-img-qc.xhscdn.com/notes_pre_post/1040g3k03256c9q6lk4005ogjgc5ocmhlrj93a48?imageView2/format/png",
-            media.url,
-        )
+        assertEquals("https://sns-img-qc.xhscdn.com/notes_pre_post/1040g3k03256c9q6lk4005ogjgc5ocmhlrj93a48", media.url)
         assertEquals("https://sns-webpic-qc.xhscdn.com/photo!h5_1080jpg", media.thumbnailUrl)
-        assertEquals(2560, media.variants.single().width)
-        assertEquals(3840, media.variants.single().height)
-        assertEquals("image_6aaab10b000000002902ecba_01.png", media.suggestedFileName())
+        assertEquals(2, media.variants.size)
+        assertEquals(2560, media.variants.first().width)
+        assertEquals(3840, media.variants.first().height)
+        assertEquals("image_6aaab10b000000002902ecba_01.jpg", media.suggestedFileName())
     }
 
     @Test
