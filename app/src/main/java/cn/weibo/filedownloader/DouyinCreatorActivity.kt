@@ -40,6 +40,7 @@ class DouyinCreatorActivity : Activity() {
     private lateinit var xiaohongshuRepository: XiaohongshuCreatorRepository
     private var webLoader: DouyinCreatorWebLoader? = null
     private var bilibiliWebLoader: BilibiliCreatorWebLoader? = null
+    private var xiaohongshuWebLoader: XiaohongshuCreatorWebLoader? = null
     private lateinit var creator: CreatorProfile
     private lateinit var adapter: CreatorWorksAdapter
     private lateinit var worksList: RecyclerView
@@ -94,6 +95,10 @@ class DouyinCreatorActivity : Activity() {
                     Platform.WEIBO -> ""
                 }
             },
+            seedPostId = intent.getStringExtra(EXTRA_CREATOR_SEED_ID).orEmpty(),
+            seedPostTitle = intent.getStringExtra(EXTRA_CREATOR_SEED_TITLE).orEmpty(),
+            seedPostCoverUrl = intent.getStringExtra(EXTRA_CREATOR_SEED_COVER).orEmpty(),
+            seedPostUrl = intent.getStringExtra(EXTRA_CREATOR_SEED_URL).orEmpty(),
         )
         if (creatorPlatform in setOf(Platform.WEIBO, Platform.INSTAGRAM)) {
             finish()
@@ -240,8 +245,48 @@ class DouyinCreatorActivity : Activity() {
         executor.execute {
             val result = runCatching { xiaohongshuRepository.loadPage(creator) }
             runOnUiThread {
-                loading = false; xiaohongshuLoaded = true
-                result.fold({ page -> bindCreator(page.creator); adapter.append(page.works); hasMore = false; if (adapter.itemCount > 0) state.visibility = View.GONE else showMessage(R.string.creator_empty, false) }, { hasMore = false; showMessage(R.string.creator_load_failed, true) })
+                loading = false
+                result.fold(
+                    { page ->
+                        if (page.works.isNotEmpty()) {
+                            XiaohongshuCreatorWebLoader.saveCachedWorks(this, page.creator, page.works)
+                            xiaohongshuLoaded = true
+                            bindCreator(page.creator)
+                            adapter.append(page.works)
+                            hasMore = false
+                            state.visibility = View.GONE
+                        } else {
+                            startXiaohongshuWebFallback()
+                        }
+                    },
+                    { startXiaohongshuWebFallback() },
+                )
+            }
+        }
+    }
+
+    private fun startXiaohongshuWebFallback() {
+        loading = true
+        if (adapter.itemCount == 0) showLoading() else state.visibility = View.GONE
+        xiaohongshuWebLoader?.close()
+        xiaohongshuWebLoader = XiaohongshuCreatorWebLoader(this, creator).also { loader ->
+            loader.load { result ->
+                runOnUiThread {
+                    loading = false
+                    xiaohongshuLoaded = true
+                    result.fold(
+                        { page ->
+                            bindCreator(page.creator)
+                            adapter.append(page.works)
+                            hasMore = false
+                            if (adapter.itemCount > 0) state.visibility = View.GONE else showMessage(R.string.creator_empty, false)
+                        },
+                        {
+                            hasMore = false
+                            showMessage(R.string.creator_load_failed, true)
+                        },
+                    )
+                }
             }
         }
     }
@@ -600,6 +645,7 @@ class DouyinCreatorActivity : Activity() {
         quickDownloadClient?.close()
         webLoader?.close()
         bilibiliWebLoader?.close()
+        xiaohongshuWebLoader?.close()
         executor.shutdownNow()
         super.onDestroy()
     }
@@ -611,6 +657,10 @@ class DouyinCreatorActivity : Activity() {
         private const val EXTRA_CREATOR_AVATAR = "creator_avatar"
         private const val EXTRA_CREATOR_URL = "creator_url"
         private const val EXTRA_CREATOR_PLATFORM = "creator_platform"
+        private const val EXTRA_CREATOR_SEED_ID = "creator_seed_id"
+        private const val EXTRA_CREATOR_SEED_TITLE = "creator_seed_title"
+        private const val EXTRA_CREATOR_SEED_COVER = "creator_seed_cover"
+        private const val EXTRA_CREATOR_SEED_URL = "creator_seed_url"
 
         fun createIntent(context: Context, creator: CreatorProfile): Intent =
             Intent(context, DouyinCreatorActivity::class.java)
@@ -619,6 +669,10 @@ class DouyinCreatorActivity : Activity() {
                 .putExtra(EXTRA_CREATOR_NAME, creator.name)
                 .putExtra(EXTRA_CREATOR_AVATAR, creator.avatarUrl)
                 .putExtra(EXTRA_CREATOR_URL, creator.profileUrl)
+                .putExtra(EXTRA_CREATOR_SEED_ID, creator.seedPostId)
+                .putExtra(EXTRA_CREATOR_SEED_TITLE, creator.seedPostTitle)
+                .putExtra(EXTRA_CREATOR_SEED_COVER, creator.seedPostCoverUrl)
+                .putExtra(EXTRA_CREATOR_SEED_URL, creator.seedPostUrl)
     }
 }
 

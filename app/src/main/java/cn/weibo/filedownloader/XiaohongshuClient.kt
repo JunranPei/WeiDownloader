@@ -6,6 +6,7 @@ import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URI
 import java.net.URL
+import java.net.URLDecoder
 
 internal object XiaohongshuLinkParser {
     private val hosts = setOf(
@@ -29,6 +30,8 @@ internal data class XiaohongshuPostData(
     val author: String,
     val authorId: String,
     val avatarUrl: String,
+    val accessToken: String,
+    val profileAccessToken: String,
     val media: List<MediaItem>,
 )
 
@@ -39,15 +42,16 @@ internal object XiaohongshuPageNormalizer {
     )
 
     fun normalize(html: String, fallbackId: String = "xhs"): XiaohongshuPostData? {
-        val note = pageStateMarkers.asSequence().mapNotNull { marker ->
+        val state = pageStateMarkers.asSequence().mapNotNull { marker ->
             val markerStart = html.indexOf(marker)
             if (markerStart < 0) return@mapNotNull null
             val stateStart = html.indexOf('{', markerStart)
             val scriptEnd = html.indexOf("</script>", stateStart)
             if (stateStart < 0 || scriptEnd < 0) return@mapNotNull null
             val stateText = html.substring(stateStart, scriptEnd).trim().removeSuffix(";")
-            runCatching { JSONObject(stateText) }.getOrNull()?.let(::findNote)
+            runCatching { JSONObject(stateText) }.getOrNull()
         }.firstOrNull() ?: return null
+        val note = findNote(state) ?: return null
         val id = note.optString("noteId").ifBlank { fallbackId }
         val user = note.optJSONObject("user") ?: JSONObject()
         val author = user.optString("nickName").ifBlank { user.optString("nickname") }
@@ -55,15 +59,28 @@ internal object XiaohongshuPageNormalizer {
         val videoThumbnailUrl = images.firstOrNull()?.let { image ->
             image.thumbnailUrl.ifBlank { image.url }
         }.orEmpty()
-        val videos = parseVideos(note.optJSONObject("video"), id, videoThumbnailUrl)
+        val videos = parseVideos(note, id, videoThumbnailUrl)
         val media = if (videos.isNotEmpty()) videos else images
         if (media.isEmpty()) return null
+        val accessToken = findAccessToken(note).ifBlank { findAccessToken(state) }
+        val profileTokenPattern = Regex("/user/profile/[^\"'?]+[^\"']*[?&]xsec_token=([^&\"']+)")
+        val profileHtml = html.replace("&amp;", "&")
+            .replace("\\u002F", "/")
+            .replace("\\u003F", "?")
+            .replace("\\u0026", "&")
+        val profileAccessTokenRaw: String = profileTokenPattern
+            .find(profileHtml)?.groupValues?.getOrNull(1) ?: ""
+        val profileAccessToken = runCatching {
+            URLDecoder.decode(profileAccessTokenRaw.replace("&amp;", "&"), "UTF-8")
+        }.getOrDefault(profileAccessTokenRaw)
         return XiaohongshuPostData(
             id = id,
             title = note.optString("title").ifBlank { note.optString("desc") },
             author = author,
             authorId = user.optString("userId"),
             avatarUrl = secureUrl(user.optString("avatar")),
+            accessToken = accessToken,
+            profileAccessToken = profileAccessToken,
             media = media,
         )
     }
@@ -75,6 +92,17 @@ internal object XiaohongshuPageNormalizer {
         }
         is JSONArray -> (0 until value.length()).asSequence().mapNotNull { findNote(value.opt(it)) }.firstOrNull()
         else -> null
+    }
+
+    private fun findAccessToken(value: Any?): String = when (value) {
+        is JSONObject -> {
+            value.optString("xsecToken").ifBlank { value.optString("xsec_token") }
+                .ifBlank { value.keys().asSequence().mapNotNull { findAccessToken(value.opt(it)).takeIf(String::isNotBlank) }.firstOrNull().orEmpty() }
+        }
+        is JSONArray -> (0 until value.length()).asSequence()
+            .mapNotNull { findAccessToken(value.opt(it)).takeIf(String::isNotBlank) }
+            .firstOrNull().orEmpty()
+        else -> ""
     }
 
     private fun parseImages(values: JSONArray?, postId: String): List<MediaItem> = buildList {
@@ -124,10 +152,14 @@ internal object XiaohongshuPageNormalizer {
         return "https://$host/$fileId"
     }
 
-    private fun parseVideos(video: JSONObject?, postId: String, thumbnailUrl: String): List<MediaItem> {
-        if (video == null) return emptyList()
+    private fun parseVideos(note: JSONObject, postId: String, thumbnailUrl: String): List<MediaItem> {
         val candidates = mutableListOf<MediaVariant>()
-        collectVideoUrls(video, candidates)
+        // XHS has shipped several state shapes: video can be an object, array,
+        // direct URL, or live under videoInfo/video_info. Inspect all of them.
+        listOf("video", "videoInfo", "video_info", "playInfo", "play_info", "media").forEach { field ->
+            note.opt(field)?.let { collectVideoUrls(it, candidates, field) }
+        }
+        if (candidates.isEmpty()) collectVideoUrls(note, candidates, "video")
         val ranked = MediaVariantSelector.rank(MediaType.VIDEO, candidates.distinctBy(MediaVariant::url))
         val selected = ranked.firstOrNull() ?: return emptyList()
         return listOf(MediaItem(MediaType.VIDEO, selected.url, MediaQuality.PLATFORM_BEST, postId, 1, thumbnailUrl = thumbnailUrl, variants = ranked, selectedVariantKey = selected.key))
@@ -181,6 +213,7 @@ class XiaohongshuClient(private val context: Context) {
             setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 12) AppleWebKit/537.36 Chrome/120 Mobile Safari/537.36")
             setRequestProperty("Accept-Language", "zh-CN,zh;q=0.9")
             setRequestProperty("Referer", "https://www.xiaohongshu.com/")
+            XiaohongshuSession.cookieHeader().takeIf(String::isNotBlank)?.let { setRequestProperty("Cookie", it) }
         }
         try {
             val status = connection.responseCode
@@ -191,19 +224,36 @@ class XiaohongshuClient(private val context: Context) {
             val data = XiaohongshuPageNormalizer.normalize(html, fallbackId)
                 ?: throw XiaohongshuException(context.getString(R.string.xiaohongshu_no_media))
             val author = data.author.ifBlank { context.getString(R.string.xiaohongshu_default_author) }
+            val creatorProfile = CreatorProfile(
+                platform = Platform.XIAOHONGSHU,
+                id = data.authorId,
+                name = author,
+                avatarUrl = data.avatarUrl,
+                profileUrl = data.authorId.takeIf(String::isNotBlank)?.let { authorId ->
+                    buildString {
+                        append("https://www.xiaohongshu.com/user/profile/").append(authorId)
+                        val token = data.profileAccessToken.ifBlank { data.accessToken }
+                        if (token.isNotBlank()) {
+                            append("?xsec_token=")
+                            append(java.net.URLEncoder.encode(token, "UTF-8"))
+                            append("&xsec_source=pc_user&channel_type=web_note_detail_r10&parent_page_channel_type=web_profile_board")
+                        }
+                    }
+                }.orEmpty(),
+                accessToken = data.accessToken,
+                seedPostId = data.id,
+                seedPostTitle = data.title,
+                seedPostCoverUrl = data.media.firstOrNull()?.thumbnailUrl.orEmpty()
+                    .ifBlank { data.media.firstOrNull()?.url.orEmpty() },
+                seedPostUrl = finalUrl,
+            )
             return WeiboPost(
                 id = data.id,
                 text = data.title.ifBlank { context.getString(R.string.xiaohongshu_default_title) },
                 author = author,
                 sourceUrl = finalUrl,
                 media = data.media,
-                creator = CreatorProfile(
-                    platform = Platform.XIAOHONGSHU,
-                    id = data.authorId,
-                    name = author,
-                    avatarUrl = data.avatarUrl,
-                    profileUrl = data.authorId.takeIf(String::isNotBlank)?.let { "https://www.xiaohongshu.com/user/profile/$it" }.orEmpty(),
-                ),
+                creator = creatorProfile,
             )
         } catch (error: XiaohongshuException) {
             throw error
