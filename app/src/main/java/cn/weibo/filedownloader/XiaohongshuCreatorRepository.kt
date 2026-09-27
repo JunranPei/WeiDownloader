@@ -15,6 +15,14 @@ internal object XiaohongshuCreatorPageNormalizer {
         val notes = (state?.optJSONObject("user")?.opt("notes") ?: findNamedValue(state, "notes")).unwrapVueValue()
         val works = linkedMapOf<String, DouyinCreatorWork>()
         collectNotes(notes, works, creator.profileUrl)
+        if (works.isEmpty()) {
+            // SSR leaves user.notes as empty placeholders. The rendered
+            // author cards are nested in one of several state branches, so do
+            // not take the first key named "feeds" (it is often an unrelated
+            // empty home feed); walk the whole state and bind each cover to
+            // its own noteCard object.
+            collectFeedCards(state, works, creator.profileUrl)
+        }
         if (works.isEmpty()) collectRawProfileCards(html, works, creator.profileUrl)
         if (works.isEmpty()) collectLegacyLinks(html, works)
         return DouyinCreatorPage(creator, works.values.toList(), 0L, false)
@@ -56,11 +64,67 @@ internal object XiaohongshuCreatorPageNormalizer {
         else -> null
     }
 
+    private fun collectFeedCards(
+        value: Any?,
+        result: LinkedHashMap<String, DouyinCreatorWork>,
+        profileUrl: String,
+    ) {
+        when (value) {
+            is JSONObject -> {
+                val card = value.optJSONObject("noteCard")
+                if (card != null && card.optString("displayTitle").isNotBlank()) {
+                    val rawId = card.optString("noteId").ifBlank { value.optString("noteId") }
+                        .ifBlank { value.optString("id") }
+                    val id = rawId.takeIf { it.matches(Regex("[A-Za-z0-9_-]{8,}")) }
+                        ?: "profile-${result.size + 1}"
+                    val token = card.optString("xsecToken").ifBlank { value.optString("xsecToken") }
+                    val source = if (rawId.matches(Regex("[A-Za-z0-9_-]{8,}"))) buildString {
+                        append("https://www.xiaohongshu.com/explore/").append(id)
+                        if (token.isNotBlank()) {
+                            append("?xsec_token=")
+                            append(URLEncoder.encode(token, StandardCharsets.UTF_8.name()))
+                            append("&xsec_source=pc_user")
+                        }
+                    } else profileUrl
+                    result.putIfAbsent(
+                        id,
+                        DouyinCreatorWork(
+                            id = id,
+                            title = card.optString("displayTitle"),
+                            coverUrl = findCoverUrl(card),
+                            sourceUrl = source,
+                            mediaCount = 1,
+                            isGallery = card.optString("type").equals("video", ignoreCase = true),
+                        ),
+                    )
+                }
+                value.keys().forEach { key -> collectFeedCards(value.opt(key), result, profileUrl) }
+            }
+            is JSONArray -> for (index in 0 until value.length()) {
+                collectFeedCards(value.opt(index), result, profileUrl)
+            }
+        }
+    }
+
     private fun findCoverUrl(value: JSONObject): String {
         val cover = value.optJSONObject("cover") ?: value.optJSONObject("image") ?: JSONObject()
-        return listOf("urlDefault", "urlPre", "url", "url_default", "url_pre")
-            .asSequence()
-            .map { cover.optString(it) }
+        val infoList = cover.optJSONArray("infoList")
+        val infoUrl = infoList?.let { list ->
+            val preferred = (0 until list.length())
+                .mapNotNull { list.optJSONObject(it) }
+                .firstOrNull { item ->
+                    item.optString("imageScene").uppercase() in setOf("WB_PRV", "H5_DTL", "CRP")
+                }
+            preferred?.optString("url")
+        }.orEmpty()
+        return sequenceOf(
+            infoUrl,
+            cover.optString("urlDefault"),
+            cover.optString("urlPre"),
+            cover.optString("url"),
+            cover.optString("url_default"),
+            cover.optString("url_pre"),
+        )
             .firstOrNull(String::isNotBlank)
             .orEmpty()
             .replace("\\u002F", "/")

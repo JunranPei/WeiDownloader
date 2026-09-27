@@ -193,6 +193,21 @@ internal class XiaohongshuCreatorWebLoader(
         """.trimIndent()
         private val EXTRACT_SCRIPT = """
             (function() {
+              // The SSR state intentionally redacts noteId. Once the real
+              // profile page hydrates, its cover anchors contain the actual
+              // /explore/<noteId> route. Prefer those hydrated cards so a
+              // click never falls back to the author profile URL.
+              const dom = Array.from(document.querySelectorAll('a.cover[href], a[href*="/explore/"]'))
+                .map((a, index) => {
+                  const href = (a.href || '').replace(/&amp;/g, '&');
+                  const match = href.match(/\/(?:explore|discovery\/item)\/([A-Za-z0-9_-]{8,})/);
+                  if (!match) return null;
+                  const img = a.querySelector('img');
+                  const card = a.closest('.note-item, [data-index]');
+                  const title = card ? (card.innerText || '').split('\n').find(x => x.trim()) || '' : '';
+                  return {id: match[1], token: new URL(href).searchParams.get('xsec_token') || '', title, cover: img ? (img.currentSrc || img.src || '') : ''};
+                }).filter(Boolean);
+              if (dom.length > 1) return JSON.stringify(dom);
               const root = window.__INITIAL_STATE__ || {};
               const ref = root.user && root.user.notes;
               const notes = ref && (ref.value !== undefined ? ref.value : (ref._value !== undefined ? ref._value : ref));
