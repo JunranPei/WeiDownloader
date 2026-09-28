@@ -90,6 +90,11 @@ internal class XiaohongshuCreatorWebLoader(
             if (attempt == 0 || works.isNotEmpty() || attempt == 20) {
                 Log.d("XhsWebLoader", "poll attempt=$attempt url=${view.url?.take(180)} works=${works.size} result=${raw?.take(1800)}")
             }
+            if (attempt == 0 && works.isEmpty()) {
+                view.evaluateJavascript(DEBUG_SCRIPT) { debug ->
+                    Log.d("XhsWebLoader", "pageDebug=${debug?.take(5000)}")
+                }
+            }
             if (works.isNotEmpty()) {
                 if (works.size > 1) writeCachedWorks(works)
                 callback(Result.success(DouyinCreatorPage(creator.copy(profileUrl = activeProfileUrl), works, works.size.toLong(), false)))
@@ -183,18 +188,15 @@ internal class XiaohongshuCreatorWebLoader(
                 .edit().putString("works:${creator.id}", values.toString()).apply()
         }
 
-        // Match the desktop profile response used by the local probe. The mobile
-        // WebView UA is served an empty shell and never hydrates note cards.
         private const val DESKTOP_USER_AGENT =
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
-                "Chrome/128.0 Safari/537.36"
+            "Mozilla/5.0 (Linux; Android 12; Medium_Phone) AppleWebKit/537.36 Chrome/120.0 Mobile Safari/537.36"
         private val PROFILE_LINK_SCRIPT = """
             (function() {
               const links = Array.from(document.querySelectorAll('a[href*="/user/profile/"]'));
               const exact = links.find(a => (a.href || '').includes('xsec_token='));
               if (exact) return exact.href;
               const html = document.documentElement ? document.documentElement.innerHTML.replaceAll('&amp;', '&') : '';
-              const match = html.match(/\\/user\\/profile\\/[^"\\s]+[?&]xsec_token=[^&"\\s]+[^"\\s]*/);
+              const match = html.match(/\/user\/profile\/[^"\s]+[?&]xsec_token=[^&"\s]+[^"\s]*/);
               return match ? new URL(match[0], location.origin).href : '';
             })()
         """.trimIndent()
@@ -216,6 +218,24 @@ internal class XiaohongshuCreatorWebLoader(
                 }).filter(Boolean);
               if (dom.length > 1) return JSON.stringify(dom);
               const root = window.__INITIAL_STATE__ || {};
+              const unwrap = value => value && value.value !== undefined ? value.value : value;
+              const routeToken = (((root.noteData || {}).routeQuery || {}).xsec_token || '').toString();
+              const profileNotes = unwrap(root.profile && root.profile.noteData);
+              if (Array.isArray(profileNotes)) {
+                const profileWorks = profileNotes.map(item => {
+                  const id = (item && (item.id || item.noteId || '')).toString();
+                  const cover = item && item.cover ? (item.cover.url || item.cover.urlDefault || '') : '';
+                  const normalizedCover = cover.startsWith('//') ? 'https:' + cover :
+                    (cover.startsWith('http://') ? 'https://' + cover.substring(7) : cover);
+                  return {
+                    id: id,
+                    token: routeToken,
+                    title: item && (item.title || item.displayTitle || '') || '',
+                    cover: normalizedCover
+                  };
+                }).filter(x => /^[A-Za-z0-9_-]{8,}$/.test(x.id) && (x.title || x.cover));
+                if (profileWorks.length) return JSON.stringify(profileWorks);
+              }
               const ref = root.user && root.user.notes;
               const notes = ref && (ref.value !== undefined ? ref.value : (ref._value !== undefined ? ref._value : ref));
               const flat = [];
@@ -231,6 +251,29 @@ internal class XiaohongshuCreatorWebLoader(
                   cover: cover.urlDefault || cover.urlPre || cover.url || ''
                 };
               }).filter(x => x.title || x.id));
+            })()
+        """.trimIndent()
+        private val DEBUG_SCRIPT = """
+            (function() {
+              const links = Array.from(document.querySelectorAll('a[href]'))
+                .map(a => a.href || '').filter(Boolean).slice(0, 80);
+              const text = (document.body && document.body.innerText || '').slice(0, 1000);
+              const html = document.documentElement ? document.documentElement.innerHTML : '';
+              return JSON.stringify({
+                title: document.title || '',
+                hrefs: links,
+                text: text,
+                noteCard: html.includes('noteCard'),
+                htmlSize: html.length,
+                initialKeys: Object.keys(window.__INITIAL_STATE__ || {}).slice(0, 40),
+                noteDataKeys: Object.keys((window.__INITIAL_STATE__ || {}).noteData || {}).slice(0, 40),
+                noteData: JSON.stringify((window.__INITIAL_STATE__ || {}).noteData || {}).slice(0, 4500),
+                profileKeys: Object.keys((window.__INITIAL_STATE__ || {}).profile || {}).slice(0, 40),
+                profileNoteData: JSON.stringify(((window.__INITIAL_STATE__ || {}).profile || {}).noteData || {}).slice(0, 3000),
+                profileNotePage: JSON.stringify(((window.__INITIAL_STATE__ || {}).profile || {}).notePage || {}).slice(0, 3000),
+                dataAttrs: Array.from(document.querySelectorAll('[data-note-id], [data-id], [data-index]')).slice(0, 40).map(x => ({tag: x.tagName, id: x.getAttribute('data-note-id'), dataId: x.getAttribute('data-id'), index: x.getAttribute('data-index'), html: x.outerHTML.slice(0, 500)})),
+                images: Array.from(document.querySelectorAll('img')).slice(0, 40).map(x => ({src: x.currentSrc || x.src || '', alt: x.alt || '', html: x.outerHTML.slice(0, 300)}))
+              });
             })()
         """.trimIndent()
     }

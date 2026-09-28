@@ -9,6 +9,9 @@ import android.webkit.CookieManager
 import android.webkit.WebChromeClient
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.webkit.WebResourceRequest
+import android.webkit.WebResourceError
+import android.util.Log
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
@@ -44,8 +47,42 @@ class LoginActivity : Activity() {
             settings.textZoom = 100
             webChromeClient = WebChromeClient()
             webViewClient = object : WebViewClient() {
+                @Suppress("DEPRECATION")
+                override fun shouldOverrideUrlLoading(view: WebView, url: String): Boolean {
+                    return false
+                }
+
+                override fun onPageStarted(view: WebView, url: String, favicon: android.graphics.Bitmap?) {
+                    Log.d("LoginActivity", "onPageStarted platform=${platform.key} url=$url")
+                    super.onPageStarted(view, url, favicon)
+                }
+
+                override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
+                    return false
+                }
+
                 override fun onPageFinished(view: WebView, url: String) {
+                    Log.d("LoginActivity", "onPageFinished url=$url title=${view.title}")
                     refreshLoginState()
+                }
+
+                override fun onReceivedHttpError(
+                    view: WebView,
+                    request: WebResourceRequest,
+                    errorResponse: android.webkit.WebResourceResponse,
+                ) {
+                    if (request.isForMainFrame) Log.d("LoginActivity", "httpError url=${request.url} status=${errorResponse.statusCode}")
+                }
+
+                override fun onReceivedError(
+                    view: WebView,
+                    request: WebResourceRequest,
+                    error: WebResourceError,
+                ) {
+                    Log.d("LoginActivity", "receivedError url=${request.url} main=${request.isForMainFrame} code=${error.errorCode} desc=${error.description}")
+                    if (request.isForMainFrame && platform == Platform.XIAOHONGSHU &&
+                        request.url.host == "creator.rednote.com"
+                    ) view.loadUrl("https://www.rednote.com/")
                 }
             }
             setInitialScale(0)
@@ -61,7 +98,7 @@ class LoginActivity : Activity() {
                     Platform.TELEGRAM -> TELEGRAM_LOGIN_URL
                     Platform.X -> X_LOGIN_URL
                     Platform.INSTAGRAM -> INSTAGRAM_LOGIN_URL
-                    Platform.XIAOHONGSHU -> "https://www.xiaohongshu.com/"
+                    Platform.XIAOHONGSHU -> XIAOHONGSHU_LOGIN_URL
                     Platform.REDDIT -> "https://www.reddit.com/"
                 },
             )
@@ -104,7 +141,7 @@ class LoginActivity : Activity() {
             Platform.TELEGRAM -> false
             Platform.X -> false
             Platform.INSTAGRAM -> false
-            Platform.XIAOHONGSHU -> false
+            Platform.XIAOHONGSHU -> XiaohongshuSession.isSignedIn()
             Platform.REDDIT -> false
         }
         doneButton.setText(if (signedIn) R.string.login_done_ready else R.string.login_done_waiting)
@@ -142,6 +179,7 @@ class LoginActivity : Activity() {
         private const val TELEGRAM_LOGIN_URL = "https://web.telegram.org/a/"
         private const val X_LOGIN_URL = "https://x.com/i/flow/login"
         private const val INSTAGRAM_LOGIN_URL = "https://www.instagram.com/accounts/login/"
+        private const val XIAOHONGSHU_LOGIN_URL = "https://www.rednote.com/login"
         private const val DESKTOP_WEB_USER_AGENT =
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
                 "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"

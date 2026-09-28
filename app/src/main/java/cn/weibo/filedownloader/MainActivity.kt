@@ -789,7 +789,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun bindCreatorPresentation(creator: CreatorProfile?) {
-        if (platform !in setOf(Platform.DOUYIN, Platform.BILIBILI, Platform.TELEGRAM, Platform.X) || creator == null || creator.id.isBlank()) {
+        if (platform !in setOf(Platform.DOUYIN, Platform.BILIBILI, Platform.TELEGRAM, Platform.X, Platform.XIAOHONGSHU) || creator == null || creator.id.isBlank()) {
             creatorCard.visibility = View.GONE
             creatorCard.setOnClickListener(null)
             return
@@ -966,7 +966,7 @@ class MainActivity : ComponentActivity() {
             Platform.TELEGRAM -> ""
             Platform.X -> ""
             Platform.INSTAGRAM -> ""
-            Platform.XIAOHONGSHU -> ""
+            Platform.XIAOHONGSHU -> XiaohongshuSession.cookieHeader()
             Platform.REDDIT -> ""
         }
     }

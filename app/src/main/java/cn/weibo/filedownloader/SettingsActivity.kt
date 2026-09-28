@@ -132,7 +132,7 @@ class SettingsActivity : ComponentActivity() {
                 Platform.REDDIT -> R.string.reddit_default_title
             },
         )
-        val accountVisibility = if (platform in setOf(Platform.TELEGRAM, Platform.X, Platform.INSTAGRAM, Platform.XIAOHONGSHU, Platform.REDDIT)) View.GONE else View.VISIBLE
+        val accountVisibility = if (platform in setOf(Platform.TELEGRAM, Platform.X, Platform.INSTAGRAM, Platform.REDDIT)) View.GONE else View.VISIBLE
         accountSectionTitle.visibility = accountVisibility
         findViewById<View>(R.id.settingsPlatformAccountCard).visibility = accountVisibility
     }
@@ -288,10 +288,14 @@ class SettingsActivity : ComponentActivity() {
                 )
                 loginButton.text = getString(if (loggedIn) R.string.login_again else R.string.login_bilibili)
             }
+            Platform.XIAOHONGSHU -> {
+                val loggedIn = XiaohongshuSession.isSignedIn()
+                loginStatus.text = getString(if (loggedIn) R.string.login_active else R.string.login_inactive)
+                loginButton.text = getString(if (loggedIn) R.string.login_again else R.string.login_xiaohongshu)
+            }
             Platform.TELEGRAM -> Unit
             Platform.X -> Unit
             Platform.INSTAGRAM -> Unit
-            Platform.XIAOHONGSHU -> Unit
             Platform.REDDIT -> Unit
         }
     }

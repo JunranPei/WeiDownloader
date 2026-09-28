@@ -177,4 +177,10 @@ data class CreatorProfile(
     val name: String,
     val avatarUrl: String = "",
     val profileUrl: String = "",
+    /** Access token carried by XHS share URLs; empty for platforms that do not use one. */
+    val accessToken: String = "",
+    val seedPostId: String = "",
+    val seedPostTitle: String = "",
+    val seedPostCoverUrl: String = "",
+    val seedPostUrl: String = "",
 )
