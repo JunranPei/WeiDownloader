@@ -120,6 +120,8 @@ internal class XiaohongshuCreatorWebLoader(
                 val source = if (id.startsWith("profile-")) activeProfileUrl else buildString {
                     append("https://www.xiaohongshu.com/explore/").append(id)
                     if (encodedToken.isNotBlank()) append("?xsec_token=").append(encodedToken).append("&xsec_source=pc_user")
+                    if (activeProfileUrl.isNotBlank()) append(if (encodedToken.isNotBlank()) "&" else "?")
+                        .append("xhs_profile=").append(java.net.URLEncoder.encode(activeProfileUrl, "UTF-8"))
                 }
                 add(DouyinCreatorWork(id, item.optString("title"), item.optString("cover"), source, 1, false))
             }
@@ -222,16 +224,36 @@ internal class XiaohongshuCreatorWebLoader(
               const routeToken = (((root.noteData || {}).routeQuery || {}).xsec_token || '').toString();
               const profileNotes = unwrap(root.profile && root.profile.noteData);
               const profileWorks = [];
+              const findToken = value => {
+                if (!value || typeof value !== 'object') return '';
+                const direct = (value.xsecToken || value.xsec_token || value.secToken || '').toString();
+                if (direct) return direct;
+                for (const key of Object.keys(value)) {
+                  const nested = findToken(value[key]);
+                  if (nested) return nested;
+                }
+                return '';
+              };
+              const findCover = value => {
+                if (!value || typeof value !== 'object') return '';
+                const coverValue = value.cover || value.image || {};
+                const direct = typeof coverValue === 'string' ? coverValue :
+                  (coverValue.url || coverValue.urlDefault || coverValue.urlPre || '');
+                if (direct) return direct;
+                for (const key of Object.keys(value)) {
+                  const nested = findCover(value[key]);
+                  if (nested) return nested;
+                }
+                return '';
+              };
               const collectProfile = value => {
                 if (Array.isArray(value)) { value.forEach(collectProfile); return; }
                 if (!value || typeof value !== 'object') return;
                 const id = (value.id || value.noteId || '').toString();
-                const coverValue = value.cover || value.image || {};
-                const cover = typeof coverValue === 'string' ? coverValue :
-                  (coverValue.url || coverValue.urlDefault || coverValue.urlPre || '');
+                const cover = findCover(value);
                 const title = (value.title || value.displayTitle || value.desc || '').toString();
                 if (/^[A-Za-z0-9_-]{16,}$/.test(id) && (title || cover)) {
-                  const itemToken = (value.xsecToken || value.xsec_token || routeToken).toString();
+                  const itemToken = findToken(value) || routeToken;
                   const normalizedCover = cover.startsWith('//') ? 'https:' + cover :
                     (cover.startsWith('http://') ? 'https://' + cover.substring(7) : cover);
                   if (title && !profileWorks.some(x => x.id === id)) {

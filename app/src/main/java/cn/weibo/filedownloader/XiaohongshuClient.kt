@@ -236,6 +236,7 @@ class XiaohongshuClient(private val context: Context) {
             Log.d("XhsClient", "response status=$status final=${finalUrl.take(240)} html=${html.length}")
             val fallbackId = Regex("/(?:discovery/item|explore)/([A-Za-z0-9_-]{8,})").find(finalUrl)?.groupValues?.getOrNull(1).orEmpty().ifBlank { "xhs" }
             val data = XiaohongshuPageNormalizer.normalize(html, fallbackId)
+                ?: loadProfileItemFromWebView(source, fallbackId)
                 ?: loadFromWebView(source, context.getString(R.string.xiaohongshu_no_media))
             Log.d("XhsClient", "parsed id=${data.id} title=${data.title.take(80)} media=${data.media.size}")
             return buildPost(data, finalUrl)
@@ -284,6 +285,7 @@ class XiaohongshuClient(private val context: Context) {
     }
 
     private fun loadFromWebView(sourceUrl: String, failureMessage: String): XiaohongshuPostData {
+        Log.d("XhsClient", "webview start source=${sourceUrl.take(260)}")
         val latch = CountDownLatch(1)
         var result: XiaohongshuPostData? = null
         var failure: Throwable? = null
@@ -291,6 +293,7 @@ class XiaohongshuClient(private val context: Context) {
             val activity = context as? Activity
             val root = activity?.findViewById<View>(R.id.rootLayout) as? FrameLayout
             if (activity == null || root == null) {
+                Log.d("XhsClient", "webview unavailable activity=${activity != null} root=${root != null}")
                 failure = XiaohongshuException(failureMessage)
                 latch.countDown()
                 return@post
@@ -305,6 +308,7 @@ class XiaohongshuClient(private val context: Context) {
             var attempts = 0
             fun finish(value: XiaohongshuPostData?, error: Throwable?) {
                 if (result != null || failure != null) return
+                Log.d("XhsClient", "webview finish url=${view.url?.take(260)} title=${view.title?.take(100)} parsed=${value != null} error=${error?.message}")
                 result = value
                 failure = error
                 (view.parent as? FrameLayout)?.removeView(view)
@@ -321,6 +325,9 @@ class XiaohongshuClient(private val context: Context) {
                     val parsed = encoded.takeIf(String::isNotBlank)?.let { payload ->
                         XiaohongshuPageNormalizer.normalize("window.__INITIAL_STATE__=$payload", fallbackId)
                     }
+                    if (attempts == 0 || parsed != null || attempts >= 20) {
+                        Log.d("XhsClient", "webview poll attempt=$attempts url=${view.url?.take(220)} raw=${raw?.take(220)} parsed=${parsed != null}")
+                    }
                     if (parsed != null) finish(parsed, null)
                     else if (attempts++ < 20) mainHandler.postDelayed(::poll, 750)
                     else finish(null, XiaohongshuException(failureMessage))
@@ -328,6 +335,7 @@ class XiaohongshuClient(private val context: Context) {
             }
             view.webViewClient = object : WebViewClient() {
                 override fun onPageFinished(view: WebView, url: String) {
+                    Log.d("XhsClient", "webview finished url=${url.take(260)} title=${view.title?.take(100)}")
                     attempts = 0
                     mainHandler.postDelayed(::poll, 500)
                 }
@@ -340,8 +348,59 @@ class XiaohongshuClient(private val context: Context) {
             root.addView(view, params)
             view.loadUrl(sourceUrl)
         }
-        if (!latch.await(35, TimeUnit.SECONDS)) throw XiaohongshuException(failureMessage)
+        if (!latch.await(35, TimeUnit.SECONDS)) {
+            Log.d("XhsClient", "webview timeout source=${sourceUrl.take(260)}")
+            throw XiaohongshuException(failureMessage)
+        }
         return result ?: throw (failure as? XiaohongshuException ?: XiaohongshuException(failureMessage))
+    }
+
+    private fun loadProfileItemFromWebView(sourceUrl: String, targetId: String): XiaohongshuPostData? {
+        val profileUrl = runCatching { android.net.Uri.parse(sourceUrl).getQueryParameter("xhs_profile") }.getOrNull()
+            ?.takeIf(String::isNotBlank) ?: return null
+        val decodedProfile = runCatching { URLDecoder.decode(profileUrl, "UTF-8") }.getOrDefault(profileUrl)
+        Log.d("XhsClient", "profile fallback target=$targetId profile=${decodedProfile.take(240)}")
+        val latch = CountDownLatch(1)
+        var result: XiaohongshuPostData? = null
+        mainHandler.post {
+            val activity = context as? Activity
+            val root = activity?.findViewById<View>(R.id.rootLayout) as? FrameLayout
+            if (activity == null || root == null) { latch.countDown(); return@post }
+            val view = WebView(activity).apply {
+                alpha = 0.01f
+                settings.javaScriptEnabled = true
+                settings.domStorageEnabled = true
+                settings.userAgentString = WEB_USER_AGENT
+            }
+            var attempts = 0
+            fun finish(value: XiaohongshuPostData?) {
+                if (result != null) return
+                result = value
+                Log.d("XhsClient", "profile fallback finish url=${view.url?.take(240)} parsed=${value != null}")
+                (view.parent as? FrameLayout)?.removeView(view)
+                view.stopLoading(); view.destroy(); latch.countDown()
+            }
+            fun poll() {
+                if (result != null) return
+                view.evaluateJavascript(PROFILE_ITEM_SCRIPT.replace("__TARGET_ID__", JSONObject.quote(targetId))) { raw ->
+                    val encoded = runCatching { org.json.JSONTokener(raw).nextValue() as? String }.getOrNull().orEmpty()
+                    val parsed = encoded.takeIf(String::isNotBlank)?.let { XiaohongshuPageNormalizer.normalize("window.__INITIAL_STATE__=$it", targetId) }
+                    if (parsed != null) finish(parsed)
+                    else if (attempts++ < 24) mainHandler.postDelayed(::poll, 750)
+                    else finish(null)
+                }
+            }
+            view.webViewClient = object : WebViewClient() {
+                override fun onPageFinished(view: WebView, url: String) {
+                    Log.d("XhsClient", "profile fallback page=${url.take(240)}")
+                    mainHandler.postDelayed(::poll, 700)
+                }
+            }
+            root.addView(view, FrameLayout.LayoutParams(1, 1))
+            view.loadUrl(decodedProfile)
+        }
+        latch.await(35, TimeUnit.SECONDS)
+        return result
     }
 
     companion object {
@@ -351,6 +410,28 @@ class XiaohongshuClient(private val context: Context) {
               const state = window.__INITIAL_STATE__ || {};
               const note = state.noteData && state.noteData.data && state.noteData.data.noteData;
               return note && (note.noteId || note.imageList || note.video) ? JSON.stringify(note) : '';
+            })()
+        """
+        private const val PROFILE_ITEM_SCRIPT = """
+            (function() {
+              const target = __TARGET_ID__;
+              const root = window.__INITIAL_STATE__ || {};
+              const seen = new Set();
+              let found = null;
+              const walk = value => {
+                if (found || !value || typeof value !== 'object' || seen.has(value)) return;
+                seen.add(value);
+                if (String(value.noteId || value.id || '') === target &&
+                    (value.imageList || value.video || value.noteCard)) { found = value; return; }
+                Object.keys(value).forEach(key => walk(value[key]));
+              };
+              walk(root);
+              if (!found) {
+                const links = Array.from(document.querySelectorAll('a[href*="/explore/"]'));
+                const link = links.find(a => (a.href || '').includes('/' + target));
+                if (link) { link.click(); }
+              }
+              return found ? JSON.stringify(found) : '';
             })()
         """
     }
