@@ -87,6 +87,9 @@ internal class XiaohongshuCreatorWebLoader(
         if (closed) return
         view.evaluateJavascript(EXTRACT_SCRIPT) { raw ->
             val works = parseWorks(raw)
+            if (attempt == 0 || works.isNotEmpty() || attempt == 20) {
+                Log.d("XhsWebLoader", "poll attempt=$attempt url=${view.url?.take(180)} works=${works.size} result=${raw?.take(1800)}")
+            }
             if (works.isNotEmpty()) {
                 if (works.size > 1) writeCachedWorks(works)
                 callback(Result.success(DouyinCreatorPage(creator.copy(profileUrl = activeProfileUrl), works, works.size.toLong(), false)))
@@ -180,7 +183,11 @@ internal class XiaohongshuCreatorWebLoader(
                 .edit().putString("works:${creator.id}", values.toString()).apply()
         }
 
-        private const val DESKTOP_USER_AGENT = "Mozilla/5.0 (Linux; Android 12; Medium_Phone) AppleWebKit/537.36 Chrome/120.0 Mobile Safari/537.36"
+        // Match the desktop profile response used by the local probe. The mobile
+        // WebView UA is served an empty shell and never hydrates note cards.
+        private const val DESKTOP_USER_AGENT =
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
+                "Chrome/128.0 Safari/537.36"
         private val PROFILE_LINK_SCRIPT = """
             (function() {
               const links = Array.from(document.querySelectorAll('a[href*="/user/profile/"]'));
