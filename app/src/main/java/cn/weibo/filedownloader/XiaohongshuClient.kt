@@ -234,12 +234,17 @@ class XiaohongshuClient(private val context: Context) {
             val finalUrl = connection.url.toString()
             val html = connection.inputStream.bufferedReader().use { it.readText() }
             Log.d("XhsClient", "response status=$status final=${finalUrl.take(240)} html=${html.length}")
-            val fallbackId = Regex("/(?:discovery/item|explore)/([A-Za-z0-9_-]{8,})").find(finalUrl)?.groupValues?.getOrNull(1).orEmpty().ifBlank { "xhs" }
+            val fallbackId = Regex("/(?:discovery/item|explore)/([A-Za-z0-9_-]{8,})")
+                .find(source)?.groupValues?.getOrNull(1)
+                ?: Regex("/(?:discovery/item|explore)/([A-Za-z0-9_-]{8,})")
+                    .find(finalUrl)?.groupValues?.getOrNull(1)
+                ?: "xhs"
             val data = XiaohongshuPageNormalizer.normalize(html, fallbackId)
                 ?: loadProfileItemFromWebView(source, fallbackId)
                 ?: loadFromWebView(source, context.getString(R.string.xiaohongshu_no_media))
             Log.d("XhsClient", "parsed id=${data.id} title=${data.title.take(80)} media=${data.media.size}")
-            return buildPost(data, finalUrl)
+            val resolvedSource = if (finalUrl.contains("/website-login/error")) source else finalUrl
+            return buildPost(data, resolvedSource)
         } catch (error: XiaohongshuException) {
             throw error
         } catch (error: Exception) {
@@ -358,7 +363,7 @@ class XiaohongshuClient(private val context: Context) {
     private fun loadProfileItemFromWebView(sourceUrl: String, targetId: String): XiaohongshuPostData? {
         val profileUrl = runCatching { android.net.Uri.parse(sourceUrl).getQueryParameter("xhs_profile") }.getOrNull()
             ?.takeIf(String::isNotBlank) ?: return null
-        val decodedProfile = runCatching { URLDecoder.decode(profileUrl, "UTF-8") }.getOrDefault(profileUrl)
+        val decodedProfile = profileUrl
         Log.d("XhsClient", "profile fallback target=$targetId profile=${decodedProfile.take(240)}")
         val latch = CountDownLatch(1)
         var result: XiaohongshuPostData? = null
@@ -422,16 +427,23 @@ class XiaohongshuClient(private val context: Context) {
                 if (found || !value || typeof value !== 'object' || seen.has(value)) return;
                 seen.add(value);
                 if (String(value.noteId || value.id || '') === target &&
-                    (value.imageList || value.video || value.noteCard)) { found = value; return; }
+                    (value.imageList || value.video)) { found = value; return; }
                 Object.keys(value).forEach(key => walk(value[key]));
               };
               walk(root);
+              if (!found && !window.__xhsNoteInfoFetchStarted) {
+                window.__xhsNoteInfoFetchStarted = true;
+                fetch('/api/sns/h5/v1/note_info?noteId=' + encodeURIComponent(target), {credentials: 'include'})
+                  .then(response => response.text())
+                  .then(text => { window.__xhsNoteInfo = text; })
+                  .catch(() => { window.__xhsNoteInfo = ''; });
+              }
               if (!found) {
-                const links = Array.from(document.querySelectorAll('a[href*="/explore/"]'));
-                const link = links.find(a => (a.href || '').includes('/' + target));
+                const links = Array.from(document.querySelectorAll('a[href*="/explore/"],a[href*="/discovery/item/"],[data-note-id],[data-id]'));
+                const link = links.find(a => ((a.href || '') + ' ' + (a.getAttribute('data-note-id') || '') + ' ' + (a.getAttribute('data-id') || '')).includes(target));
                 if (link) { link.click(); }
               }
-              return found ? JSON.stringify(found) : '';
+              return window.__xhsNoteInfo || (found ? JSON.stringify(found) : '');
             })()
         """
     }
