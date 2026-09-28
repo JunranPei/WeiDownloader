@@ -248,7 +248,12 @@ class DouyinCreatorActivity : Activity() {
                 loading = false
                 result.fold(
                     { page ->
-                        if (page.works.isNotEmpty()) {
+                        val hasIndividualXhsLinks = page.works.isNotEmpty() &&
+                            page.works.all { work ->
+                                work.sourceUrl.contains("/explore/") ||
+                                    work.sourceUrl.contains("/discovery/item/")
+                            }
+                        if (page.works.isNotEmpty() && (page.creator.platform != Platform.XIAOHONGSHU || hasIndividualXhsLinks)) {
                             XiaohongshuCreatorWebLoader.saveCachedWorks(this, page.creator, page.works)
                             xiaohongshuLoaded = true
                             bindCreator(page.creator)
