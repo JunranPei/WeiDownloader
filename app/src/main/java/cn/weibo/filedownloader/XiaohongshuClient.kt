@@ -433,7 +433,18 @@ class XiaohongshuClient(private val context: Context) {
               walk(root);
               if (!found && !window.__xhsNoteInfoFetchStarted) {
                 window.__xhsNoteInfoFetchStarted = true;
-                fetch('/api/sns/h5/v1/note_info?noteId=' + encodeURIComponent(target), {credentials: 'include'})
+                const routeToken = (((root.noteData || {}).routeQuery || {}).xsec_token || '').toString();
+                const body = JSON.stringify({
+                  sourceNoteId: target,
+                  imageFormats: [],
+                  extra: {needBodyTopic: '1'},
+                  xsecToken: routeToken,
+                  xsecSource: 'pc_user'
+                });
+                fetch('/api/sns/web/v1/feed', {
+                  method: 'POST', credentials: 'include',
+                  headers: {'Content-Type': 'application/json'}, body: body
+                })
                   .then(response => response.text())
                   .then(text => { window.__xhsNoteInfo = text; })
                   .catch(() => { window.__xhsNoteInfo = ''; });
