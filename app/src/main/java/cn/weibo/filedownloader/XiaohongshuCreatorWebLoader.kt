@@ -114,9 +114,12 @@ internal class XiaohongshuCreatorWebLoader(
                 val item = values.optJSONObject(index) ?: continue
                 val id = item.optString("id").ifBlank { "profile-${index + 1}" }
                 val token = item.optString("token")
+                val encodedToken = token.takeIf { it.isNotBlank() }?.let {
+                    java.net.URLEncoder.encode(it, "UTF-8")
+                }.orEmpty()
                 val source = if (id.startsWith("profile-")) activeProfileUrl else buildString {
                     append("https://www.xiaohongshu.com/explore/").append(id)
-                    if (token.isNotBlank()) append("?xsec_token=").append(token).append("&xsec_source=pc_user")
+                    if (encodedToken.isNotBlank()) append("?xsec_token=").append(encodedToken).append("&xsec_source=pc_user")
                 }
                 add(DouyinCreatorWork(id, item.optString("title"), item.optString("cover"), source, 1, false))
             }
@@ -202,10 +205,46 @@ internal class XiaohongshuCreatorWebLoader(
         """.trimIndent()
         private val EXTRACT_SCRIPT = """
             (function() {
-              // The SSR state intentionally redacts noteId. Once the real
-              // profile page hydrates, its cover anchors contain the actual
-              // /explore/<noteId> route. Prefer those hydrated cards so a
-              // click never falls back to the author profile URL.
+              const root = window.__INITIAL_STATE__ || {};
+              const unwrap = value => {
+                let current = value;
+                for (let i = 0; i < 5 && current && typeof current === 'object'; i++) {
+                  if (current.value !== undefined) current = current.value;
+                  else if (current._value !== undefined) current = current._value;
+                  else if (current.data !== undefined && !Array.isArray(current)) current = current.data;
+                  else break;
+                }
+                if (typeof current === 'string') {
+                  try { return JSON.parse(current); } catch (_) { return current; }
+                }
+                return current;
+              };
+              const routeToken = (((root.noteData || {}).routeQuery || {}).xsec_token || '').toString();
+              const profileNotes = unwrap(root.profile && root.profile.noteData);
+              const profileWorks = [];
+              const collectProfile = value => {
+                if (Array.isArray(value)) { value.forEach(collectProfile); return; }
+                if (!value || typeof value !== 'object') return;
+                const id = (value.id || value.noteId || '').toString();
+                const coverValue = value.cover || value.image || {};
+                const cover = typeof coverValue === 'string' ? coverValue :
+                  (coverValue.url || coverValue.urlDefault || coverValue.urlPre || '');
+                const title = (value.title || value.displayTitle || value.desc || '').toString();
+                if (/^[A-Za-z0-9_-]{16,}$/.test(id) && (title || cover)) {
+                  const itemToken = (value.xsecToken || value.xsec_token || routeToken).toString();
+                  const normalizedCover = cover.startsWith('//') ? 'https:' + cover :
+                    (cover.startsWith('http://') ? 'https://' + cover.substring(7) : cover);
+                  if (title && !profileWorks.some(x => x.id === id)) {
+                    profileWorks.push({id, token: itemToken, title, cover: normalizedCover});
+                  }
+                }
+                Object.keys(value).forEach(key => collectProfile(value[key]));
+              };
+              collectProfile(profileNotes);
+              if (profileWorks.length) return JSON.stringify(profileWorks);
+              // Some WebView builds expose hydrated anchors but redact the
+              // profile state. Use those links only as a fallback; the DOM
+              // route can contain a redirect id rather than the profile note id.
               const dom = Array.from(document.querySelectorAll('a.cover[href], a[href*="/explore/"]'))
                 .map((a, index) => {
                   const href = (a.href || '').replace(/&amp;/g, '&');
@@ -217,25 +256,6 @@ internal class XiaohongshuCreatorWebLoader(
                   return {id: match[1], token: new URL(href).searchParams.get('xsec_token') || '', title, cover: img ? (img.currentSrc || img.src || '') : ''};
                 }).filter(Boolean);
               if (dom.length > 1) return JSON.stringify(dom);
-              const root = window.__INITIAL_STATE__ || {};
-              const unwrap = value => value && value.value !== undefined ? value.value : value;
-              const routeToken = (((root.noteData || {}).routeQuery || {}).xsec_token || '').toString();
-              const profileNotes = unwrap(root.profile && root.profile.noteData);
-              if (Array.isArray(profileNotes)) {
-                const profileWorks = profileNotes.map(item => {
-                  const id = (item && (item.id || item.noteId || '')).toString();
-                  const cover = item && item.cover ? (item.cover.url || item.cover.urlDefault || '') : '';
-                  const normalizedCover = cover.startsWith('//') ? 'https:' + cover :
-                    (cover.startsWith('http://') ? 'https://' + cover.substring(7) : cover);
-                  return {
-                    id: id,
-                    token: routeToken,
-                    title: item && (item.title || item.displayTitle || '') || '',
-                    cover: normalizedCover
-                  };
-                }).filter(x => /^[A-Za-z0-9_-]{8,}$/.test(x.id) && (x.title || x.cover));
-                if (profileWorks.length) return JSON.stringify(profileWorks);
-              }
               const ref = root.user && root.user.notes;
               const notes = ref && (ref.value !== undefined ? ref.value : (ref._value !== undefined ? ref._value : ref));
               const flat = [];

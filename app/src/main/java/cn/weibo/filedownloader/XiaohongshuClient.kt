@@ -1,12 +1,23 @@
 package cn.weibo.filedownloader
 
+import android.app.Activity
 import android.content.Context
+import android.graphics.Color
+import android.os.Handler
+import android.os.Looper
+import android.util.Log
+import android.view.View
+import android.webkit.WebView
+import android.webkit.WebViewClient
+import android.widget.FrameLayout
 import org.json.JSONArray
 import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URI
 import java.net.URL
 import java.net.URLDecoder
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 
 internal object XiaohongshuLinkParser {
     private val hosts = setOf(
@@ -203,6 +214,8 @@ internal object XiaohongshuPageNormalizer {
 }
 
 class XiaohongshuClient(private val context: Context) {
+    private val mainHandler = Handler(Looper.getMainLooper())
+
     fun loadPost(sharedText: String): WeiboPost {
         val source = XiaohongshuLinkParser.extractUrl(sharedText)
         if (!XiaohongshuLinkParser.isSupported(source)) throw XiaohongshuException(context.getString(R.string.xiaohongshu_url_not_found))
@@ -220,41 +233,12 @@ class XiaohongshuClient(private val context: Context) {
             if (status !in 200..299) throw XiaohongshuException(context.getString(R.string.xiaohongshu_http_error, status))
             val finalUrl = connection.url.toString()
             val html = connection.inputStream.bufferedReader().use { it.readText() }
+            Log.d("XhsClient", "response status=$status final=${finalUrl.take(240)} html=${html.length}")
             val fallbackId = Regex("/(?:discovery/item|explore)/([A-Za-z0-9_-]{8,})").find(finalUrl)?.groupValues?.getOrNull(1).orEmpty().ifBlank { "xhs" }
             val data = XiaohongshuPageNormalizer.normalize(html, fallbackId)
-                ?: throw XiaohongshuException(context.getString(R.string.xiaohongshu_no_media))
-            val author = data.author.ifBlank { context.getString(R.string.xiaohongshu_default_author) }
-            val creatorProfile = CreatorProfile(
-                platform = Platform.XIAOHONGSHU,
-                id = data.authorId,
-                name = author,
-                avatarUrl = data.avatarUrl,
-                profileUrl = data.authorId.takeIf(String::isNotBlank)?.let { authorId ->
-                    buildString {
-                        append("https://www.xiaohongshu.com/user/profile/").append(authorId)
-                        val token = data.profileAccessToken.ifBlank { data.accessToken }
-                        if (token.isNotBlank()) {
-                            append("?xsec_token=")
-                            append(java.net.URLEncoder.encode(token, "UTF-8"))
-                            append("&xsec_source=pc_user&channel_type=web_note_detail_r10&parent_page_channel_type=web_profile_board")
-                        }
-                    }
-                }.orEmpty(),
-                accessToken = data.accessToken,
-                seedPostId = data.id,
-                seedPostTitle = data.title,
-                seedPostCoverUrl = data.media.firstOrNull()?.thumbnailUrl.orEmpty()
-                    .ifBlank { data.media.firstOrNull()?.url.orEmpty() },
-                seedPostUrl = finalUrl,
-            )
-            return WeiboPost(
-                id = data.id,
-                text = data.title.ifBlank { context.getString(R.string.xiaohongshu_default_title) },
-                author = author,
-                sourceUrl = finalUrl,
-                media = data.media,
-                creator = creatorProfile,
-            )
+                ?: loadFromWebView(source, context.getString(R.string.xiaohongshu_no_media))
+            Log.d("XhsClient", "parsed id=${data.id} title=${data.title.take(80)} media=${data.media.size}")
+            return buildPost(data, finalUrl)
         } catch (error: XiaohongshuException) {
             throw error
         } catch (error: Exception) {
@@ -262,6 +246,113 @@ class XiaohongshuClient(private val context: Context) {
         } finally {
             connection.disconnect()
         }
+    }
+
+    private fun buildPost(data: XiaohongshuPostData, sourceUrl: String): WeiboPost {
+        val author = data.author.ifBlank { context.getString(R.string.xiaohongshu_default_author) }
+        val creatorProfile = CreatorProfile(
+            platform = Platform.XIAOHONGSHU,
+            id = data.authorId,
+            name = author,
+            avatarUrl = data.avatarUrl,
+            profileUrl = data.authorId.takeIf(String::isNotBlank)?.let { authorId ->
+                buildString {
+                    append("https://www.xiaohongshu.com/user/profile/").append(authorId)
+                    val token = data.profileAccessToken.ifBlank { data.accessToken }
+                    if (token.isNotBlank()) {
+                        append("?xsec_token=")
+                        append(java.net.URLEncoder.encode(token, "UTF-8"))
+                        append("&xsec_source=pc_user&channel_type=web_note_detail_r10&parent_page_channel_type=web_profile_board")
+                    }
+                }
+            }.orEmpty(),
+            accessToken = data.accessToken,
+            seedPostId = data.id,
+            seedPostTitle = data.title,
+            seedPostCoverUrl = data.media.firstOrNull()?.thumbnailUrl.orEmpty()
+                .ifBlank { data.media.firstOrNull()?.url.orEmpty() },
+            seedPostUrl = sourceUrl,
+        )
+        return WeiboPost(
+            id = data.id,
+            text = data.title.ifBlank { context.getString(R.string.xiaohongshu_default_title) },
+            author = author,
+            sourceUrl = sourceUrl,
+            media = data.media,
+            creator = creatorProfile,
+        )
+    }
+
+    private fun loadFromWebView(sourceUrl: String, failureMessage: String): XiaohongshuPostData {
+        val latch = CountDownLatch(1)
+        var result: XiaohongshuPostData? = null
+        var failure: Throwable? = null
+        mainHandler.post {
+            val activity = context as? Activity
+            val root = activity?.findViewById<View>(R.id.rootLayout) as? FrameLayout
+            if (activity == null || root == null) {
+                failure = XiaohongshuException(failureMessage)
+                latch.countDown()
+                return@post
+            }
+            val view = WebView(activity).apply {
+                setBackgroundColor(Color.TRANSPARENT)
+                alpha = 0.01f
+                settings.javaScriptEnabled = true
+                settings.domStorageEnabled = true
+                settings.userAgentString = WEB_USER_AGENT
+            }
+            var attempts = 0
+            fun finish(value: XiaohongshuPostData?, error: Throwable?) {
+                if (result != null || failure != null) return
+                result = value
+                failure = error
+                (view.parent as? FrameLayout)?.removeView(view)
+                view.stopLoading()
+                view.destroy()
+                latch.countDown()
+            }
+            fun poll() {
+                if (result != null || failure != null) return
+                view.evaluateJavascript(EXTRACT_NOTE_SCRIPT) { raw ->
+                    val encoded = runCatching { org.json.JSONTokener(raw).nextValue() as? String }.getOrNull().orEmpty()
+                    val fallbackId = Regex("/(?:discovery/item|explore)/([A-Za-z0-9_-]{8,})")
+                        .find(view.url.orEmpty())?.groupValues?.getOrNull(1).orEmpty()
+                    val parsed = encoded.takeIf(String::isNotBlank)?.let { payload ->
+                        XiaohongshuPageNormalizer.normalize("window.__INITIAL_STATE__=$payload", fallbackId)
+                    }
+                    if (parsed != null) finish(parsed, null)
+                    else if (attempts++ < 20) mainHandler.postDelayed(::poll, 750)
+                    else finish(null, XiaohongshuException(failureMessage))
+                }
+            }
+            view.webViewClient = object : WebViewClient() {
+                override fun onPageFinished(view: WebView, url: String) {
+                    attempts = 0
+                    mainHandler.postDelayed(::poll, 500)
+                }
+            }
+            val params = FrameLayout.LayoutParams(
+                activity.resources.displayMetrics.widthPixels,
+                activity.resources.displayMetrics.heightPixels,
+            )
+            params.leftMargin = -activity.resources.displayMetrics.widthPixels
+            root.addView(view, params)
+            view.loadUrl(sourceUrl)
+        }
+        if (!latch.await(35, TimeUnit.SECONDS)) throw XiaohongshuException(failureMessage)
+        return result ?: throw (failure as? XiaohongshuException ?: XiaohongshuException(failureMessage))
+    }
+
+    companion object {
+        private const val WEB_USER_AGENT = "Mozilla/5.0 (Linux; Android 12) AppleWebKit/537.36 Chrome/120.0 Mobile Safari/537.36"
+        private const val EXTRACT_NOTE_SCRIPT = """
+            (function() {
+              const state = window.__INITIAL_STATE__ || {};
+              const note = state.noteData && state.noteData.data && state.noteData.data.noteData;
+              return note && (note.noteId || note.imageList || note.video) ? JSON.stringify(note) : '';
+            })()
+        """
     }
 }
 
