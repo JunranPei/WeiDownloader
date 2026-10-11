@@ -30,6 +30,18 @@ internal object XiaohongshuLinkParser {
     fun extractUrl(value: String): String = (urlRegex.find(value.trim())?.value ?: value.trim())
         .trimEnd('.', ',', '!', '?', ')', ']', '。', '！', '？', '，', '；', ';')
 
+    // xhs_profile is an app navigation hint, never a website request parameter.
+    fun noteUrl(value: String): String {
+        val uri = URI(extractUrl(value))
+        val query = uri.rawQuery.orEmpty().split('&')
+            .filter { it.isNotBlank() && it.substringBefore('=') != "xhs_profile" }.joinToString("&")
+        return buildString {
+            append(uri.scheme).append("://").append(uri.rawAuthority).append(uri.rawPath.orEmpty())
+            if (query.isNotEmpty()) append('?').append(query)
+            uri.rawFragment?.let { append('#').append(it) }
+        }
+    }
+
     fun isSupported(value: String): Boolean = runCatching {
         URI(extractUrl(value)).host.orEmpty().lowercase() in hosts
     }.getOrDefault(false)
@@ -62,6 +74,15 @@ internal object XiaohongshuPageNormalizer {
             val stateText = html.substring(stateStart, scriptEnd).trim().removeSuffix(";")
             runCatching { JSONObject(stateText) }.getOrNull()
         }.firstOrNull() ?: return null
+        return normalizeState(state, fallbackId, html)
+    }
+
+    fun normalizePayload(payload: String, fallbackId: String = "xhs"): XiaohongshuPostData? {
+        val state = runCatching { JSONObject(payload) }.getOrNull() ?: return null
+        return normalizeState(state, fallbackId, "")
+    }
+
+    private fun normalizeState(state: JSONObject, fallbackId: String, html: String): XiaohongshuPostData? {
         val note = findNote(state) ?: return null
         val id = note.optString("noteId").ifBlank { fallbackId }
         val user = note.optJSONObject("user") ?: JSONObject()
@@ -216,9 +237,20 @@ internal object XiaohongshuPageNormalizer {
 class XiaohongshuClient(private val context: Context) {
     private val mainHandler = Handler(Looper.getMainLooper())
 
+    private fun webViewRoot(activity: Activity): FrameLayout? =
+        (activity.findViewById<View>(R.id.rootLayout) as? FrameLayout)
+            ?: activity.findViewById(android.R.id.content)
+
     fun loadPost(sharedText: String): WeiboPost {
-        val source = XiaohongshuLinkParser.extractUrl(sharedText)
-        if (!XiaohongshuLinkParser.isSupported(source)) throw XiaohongshuException(context.getString(R.string.xiaohongshu_url_not_found))
+        val originalSource = XiaohongshuLinkParser.extractUrl(sharedText)
+        if (!XiaohongshuLinkParser.isSupported(originalSource)) throw XiaohongshuException(context.getString(R.string.xiaohongshu_url_not_found))
+        val source = XiaohongshuLinkParser.noteUrl(originalSource)
+        if (source != originalSource) {
+            // Author cards require the authenticated browser, with only the site's own query parameters.
+            val data = loadFromWebView(source, context.getString(R.string.xiaohongshu_no_media))
+            Log.d("XhsClient", "parsed id=${data.id} title=${data.title.take(80)} media=${data.media.size}")
+            return buildPost(data, source)
+        }
         val connection = (URL(source).openConnection() as HttpURLConnection).apply {
             instanceFollowRedirects = true
             connectTimeout = 15_000
@@ -233,14 +265,13 @@ class XiaohongshuClient(private val context: Context) {
             if (status !in 200..299) throw XiaohongshuException(context.getString(R.string.xiaohongshu_http_error, status))
             val finalUrl = connection.url.toString()
             val html = connection.inputStream.bufferedReader().use { it.readText() }
-            Log.d("XhsClient", "response status=$status final=${finalUrl.take(240)} html=${html.length}")
-            val fallbackId = Regex("/(?:discovery/item|explore)/([A-Za-z0-9_-]{8,})")
+            Log.d("XhsClient", "response status=$status final=${xiaohongshuLogUrl(finalUrl)} html=${html.length}")
+            val fallbackId = Regex("/(?:discovery/item|explore)/((?:[0-9a-fA-F]{24}|[0-9a-fA-F]{32}))")
                 .find(source)?.groupValues?.getOrNull(1)
-                ?: Regex("/(?:discovery/item|explore)/([A-Za-z0-9_-]{8,})")
+                ?: Regex("/(?:discovery/item|explore)/((?:[0-9a-fA-F]{24}|[0-9a-fA-F]{32}))")
                     .find(finalUrl)?.groupValues?.getOrNull(1)
                 ?: "xhs"
             val data = XiaohongshuPageNormalizer.normalize(html, fallbackId)
-                ?: loadProfileItemFromWebView(source, fallbackId)
                 ?: loadFromWebView(source, context.getString(R.string.xiaohongshu_no_media))
             Log.d("XhsClient", "parsed id=${data.id} title=${data.title.take(80)} media=${data.media.size}")
             val resolvedSource = if (finalUrl.contains("/website-login/error")) source else finalUrl
@@ -290,13 +321,13 @@ class XiaohongshuClient(private val context: Context) {
     }
 
     private fun loadFromWebView(sourceUrl: String, failureMessage: String): XiaohongshuPostData {
-        Log.d("XhsClient", "webview start source=${sourceUrl.take(260)}")
+        Log.d("XhsClient", "webview start source=${xiaohongshuLogUrl(sourceUrl)}")
         val latch = CountDownLatch(1)
         var result: XiaohongshuPostData? = null
         var failure: Throwable? = null
         mainHandler.post {
             val activity = context as? Activity
-            val root = activity?.findViewById<View>(R.id.rootLayout) as? FrameLayout
+            val root = activity?.let(::webViewRoot)
             if (activity == null || root == null) {
                 Log.d("XhsClient", "webview unavailable activity=${activity != null} root=${root != null}")
                 failure = XiaohongshuException(failureMessage)
@@ -310,10 +341,19 @@ class XiaohongshuClient(private val context: Context) {
                 settings.domStorageEnabled = true
                 settings.userAgentString = WEB_USER_AGENT
             }
+            val cookieNames = XiaohongshuSession.cookieHeader().split(';')
+                .map { it.substringBefore('=').trim() }
+                .filter(String::isNotBlank)
+                .distinct()
+                .joinToString(",")
+            Log.i(
+                "XhsClient",
+                "detail webview ua=${view.settings.userAgentString} url=${xiaohongshuLogUrl(sourceUrl)} cookies=$cookieNames",
+            )
             var attempts = 0
             fun finish(value: XiaohongshuPostData?, error: Throwable?) {
                 if (result != null || failure != null) return
-                Log.d("XhsClient", "webview finish url=${view.url?.take(260)} title=${view.title?.take(100)} parsed=${value != null} error=${error?.message}")
+                Log.d("XhsClient", "webview finish url=${xiaohongshuLogUrl(view.url)} title=${view.title?.take(100)} parsed=${value != null} error=${error?.javaClass?.simpleName}")
                 result = value
                 failure = error
                 (view.parent as? FrameLayout)?.removeView(view)
@@ -325,13 +365,13 @@ class XiaohongshuClient(private val context: Context) {
                 if (result != null || failure != null) return
                 view.evaluateJavascript(EXTRACT_NOTE_SCRIPT) { raw ->
                     val encoded = runCatching { org.json.JSONTokener(raw).nextValue() as? String }.getOrNull().orEmpty()
-                    val fallbackId = Regex("/(?:discovery/item|explore)/([A-Za-z0-9_-]{8,})")
+                    val fallbackId = Regex("/(?:discovery/item|explore)/((?:[0-9a-fA-F]{24}|[0-9a-fA-F]{32}))")
                         .find(view.url.orEmpty())?.groupValues?.getOrNull(1).orEmpty()
                     val parsed = encoded.takeIf(String::isNotBlank)?.let { payload ->
-                        XiaohongshuPageNormalizer.normalize("window.__INITIAL_STATE__=$payload", fallbackId)
+                        XiaohongshuPageNormalizer.normalizePayload(payload, fallbackId)
                     }
                     if (attempts == 0 || parsed != null || attempts >= 20) {
-                        Log.d("XhsClient", "webview poll attempt=$attempts url=${view.url?.take(220)} raw=${raw?.take(220)} parsed=${parsed != null}")
+                        Log.d("XhsClient", "webview poll attempt=$attempts url=${xiaohongshuLogUrl(view.url)} parsed=${parsed != null} payloadChars=${encoded.length}")
                     }
                     if (parsed != null) finish(parsed, null)
                     else if (attempts++ < 20) mainHandler.postDelayed(::poll, 750)
@@ -340,7 +380,7 @@ class XiaohongshuClient(private val context: Context) {
             }
             view.webViewClient = object : WebViewClient() {
                 override fun onPageFinished(view: WebView, url: String) {
-                    Log.d("XhsClient", "webview finished url=${url.take(260)} title=${view.title?.take(100)}")
+                    Log.d("XhsClient", "webview finished url=${xiaohongshuLogUrl(url)} title=${view.title?.take(100)}")
                     attempts = 0
                     mainHandler.postDelayed(::poll, 500)
                 }
@@ -354,109 +394,40 @@ class XiaohongshuClient(private val context: Context) {
             view.loadUrl(sourceUrl)
         }
         if (!latch.await(35, TimeUnit.SECONDS)) {
-            Log.d("XhsClient", "webview timeout source=${sourceUrl.take(260)}")
+            Log.d("XhsClient", "webview timeout source=${xiaohongshuLogUrl(sourceUrl)}")
             throw XiaohongshuException(failureMessage)
         }
         return result ?: throw (failure as? XiaohongshuException ?: XiaohongshuException(failureMessage))
     }
 
-    private fun loadProfileItemFromWebView(sourceUrl: String, targetId: String): XiaohongshuPostData? {
-        val profileUrl = runCatching { android.net.Uri.parse(sourceUrl).getQueryParameter("xhs_profile") }.getOrNull()
-            ?.takeIf(String::isNotBlank) ?: return null
-        val decodedProfile = profileUrl
-        Log.d("XhsClient", "profile fallback target=$targetId profile=${decodedProfile.take(240)}")
-        val latch = CountDownLatch(1)
-        var result: XiaohongshuPostData? = null
-        mainHandler.post {
-            val activity = context as? Activity
-            val root = activity?.findViewById<View>(R.id.rootLayout) as? FrameLayout
-            if (activity == null || root == null) { latch.countDown(); return@post }
-            val view = WebView(activity).apply {
-                alpha = 0.01f
-                settings.javaScriptEnabled = true
-                settings.domStorageEnabled = true
-                settings.userAgentString = WEB_USER_AGENT
-            }
-            var attempts = 0
-            fun finish(value: XiaohongshuPostData?) {
-                if (result != null) return
-                result = value
-                Log.d("XhsClient", "profile fallback finish url=${view.url?.take(240)} parsed=${value != null}")
-                (view.parent as? FrameLayout)?.removeView(view)
-                view.stopLoading(); view.destroy(); latch.countDown()
-            }
-            fun poll() {
-                if (result != null) return
-                view.evaluateJavascript(PROFILE_ITEM_SCRIPT.replace("__TARGET_ID__", JSONObject.quote(targetId))) { raw ->
-                    val encoded = runCatching { org.json.JSONTokener(raw).nextValue() as? String }.getOrNull().orEmpty()
-                    val parsed = encoded.takeIf(String::isNotBlank)?.let { XiaohongshuPageNormalizer.normalize("window.__INITIAL_STATE__=$it", targetId) }
-                    if (parsed != null) finish(parsed)
-                    else if (attempts++ < 24) mainHandler.postDelayed(::poll, 750)
-                    else finish(null)
-                }
-            }
-            view.webViewClient = object : WebViewClient() {
-                override fun onPageFinished(view: WebView, url: String) {
-                    Log.d("XhsClient", "profile fallback page=${url.take(240)}")
-                    mainHandler.postDelayed(::poll, 700)
-                }
-            }
-            root.addView(view, FrameLayout.LayoutParams(1, 1))
-            view.loadUrl(decodedProfile)
-        }
-        latch.await(35, TimeUnit.SECONDS)
-        return result
-    }
-
     companion object {
-        private const val WEB_USER_AGENT = "Mozilla/5.0 (Linux; Android 12) AppleWebKit/537.36 Chrome/120.0 Mobile Safari/537.36"
+        private const val WEB_USER_AGENT =
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
+                "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
         private const val EXTRACT_NOTE_SCRIPT = """
             (function() {
               const state = window.__INITIAL_STATE__ || {};
-              const note = state.noteData && state.noteData.data && state.noteData.data.noteData;
-              return note && (note.noteId || note.imageList || note.video) ? JSON.stringify(note) : '';
-            })()
-        """
-        private const val PROFILE_ITEM_SCRIPT = """
-            (function() {
-              const target = __TARGET_ID__;
-              const root = window.__INITIAL_STATE__ || {};
+              const routeId = (location.pathname.match(/\/(?:explore|discovery\/item)\/([0-9a-fA-F]{24,32})/) || [])[1] || '';
+              const direct = state.noteData && state.noteData.data && state.noteData.data.noteData;
+              const mapped = routeId && state.note && state.note.noteDetailMap &&
+                state.note.noteDetailMap[routeId] && state.note.noteDetailMap[routeId].note;
+              let found = direct || mapped || null;
               const seen = new Set();
-              let found = null;
               const walk = value => {
                 if (found || !value || typeof value !== 'object' || seen.has(value)) return;
                 seen.add(value);
-                if (String(value.noteId || value.id || '') === target &&
-                    (value.imageList || value.video)) { found = value; return; }
+                if (String(value.noteId || '') === routeId && (value.imageList || value.video)) {
+                  found = value;
+                  return;
+                }
                 Object.keys(value).forEach(key => walk(value[key]));
               };
-              walk(root);
-              if (!found && !window.__xhsNoteInfoFetchStarted) {
-                window.__xhsNoteInfoFetchStarted = true;
-                const routeToken = (((root.noteData || {}).routeQuery || {}).xsec_token || '').toString();
-                const body = JSON.stringify({
-                  sourceNoteId: target,
-                  imageFormats: [],
-                  extra: {needBodyTopic: '1'},
-                  xsecToken: routeToken,
-                  xsecSource: 'pc_user'
-                });
-                fetch('/api/sns/web/v1/feed', {
-                  method: 'POST', credentials: 'include',
-                  headers: {'Content-Type': 'application/json'}, body: body
-                })
-                  .then(response => response.text())
-                  .then(text => { window.__xhsNoteInfo = text; })
-                  .catch(() => { window.__xhsNoteInfo = ''; });
-              }
-              if (!found) {
-                const links = Array.from(document.querySelectorAll('a[href*="/explore/"],a[href*="/discovery/item/"],[data-note-id],[data-id]'));
-                const link = links.find(a => ((a.href || '') + ' ' + (a.getAttribute('data-note-id') || '') + ' ' + (a.getAttribute('data-id') || '')).includes(target));
-                if (link) { link.click(); }
-              }
-              return window.__xhsNoteInfo || (found ? JSON.stringify(found) : '');
+              if (!found) walk(state);
+              try { return found && (found.noteId || found.imageList || found.video) ? JSON.stringify(found) : ''; }
+              catch (_) { return ''; }
             })()
         """
+
     }
 }
 

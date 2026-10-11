@@ -6,6 +6,30 @@ import org.junit.Test
 
 class XiaohongshuParserTest {
     @Test
+    fun webViewJsonPayloadParsesWithoutHtmlScriptTags() {
+        val payload = """{"noteId":"5f29440a0000000001005014","title":"Tail video","user":{"userId":"author","nickName":"Creator"},"imageList":[{"url":"https://sns-webpic-qc.xhscdn.com/cover.jpg"}],"video":{"media":{"stream":{"h264":[{"masterUrl":"https://sns-video-qc.xhscdn.com/video.mp4"}]}}}}"""
+        val post = requireNotNull(XiaohongshuPageNormalizer.normalizePayload(payload))
+        assertEquals("5f29440a0000000001005014", post.id)
+        assertEquals("Tail video", post.title)
+        assertEquals(MediaType.VIDEO, post.media.single().type)
+    }
+
+    @Test
+    fun internalProfileHintIsRemovedWithoutChangingTheNotesOwnToken() {
+        val url = "https://www.xiaohongshu.com/explore/5f29440a0000000001005014?xsec_token=own%2Btoken%3D&xsec_source=pc_user"
+        assertEquals(url, XiaohongshuLinkParser.noteUrl(url + "&xhs_profile=https%3A%2F%2Fwww.xiaohongshu.com%2Fuser%2Fprofile%2Fauthor%3Fxsec_token%3Dprofile"))
+        assertEquals(url, XiaohongshuLinkParser.noteUrl(url))
+        assertEquals("https://xhslink.cn/o/2uN5D8VgpIH", XiaohongshuLinkParser.noteUrl("https://xhslink.cn/o/2uN5D8VgpIH"))
+    }
+
+    @Test
+    fun encodedPlaceholderMustNotBeTruncatedIntoA24CharacterId() {
+        val html = """<script>window.__INITIAL_STATE__={"user":{"notes":[{"displayTitle":"Placeholder","cover":{"urlPre":"https://example.com/img##c=vp4","fileId":"prefix%%60f9bfde158b4ae9bd0e81e60184bfb4"}}]}}</script>"""
+        val creator = CreatorProfile(Platform.XIAOHONGSHU, "user-1", "Alice", "", "https://www.xiaohongshu.com/user/profile/user-1")
+        assertTrue(XiaohongshuCreatorPageNormalizer.normalize(html, creator).works.isEmpty())
+    }
+
+    @Test
     fun extractsCreatorNotesFromInitialState() {
         val html = """<script>window.__INITIAL_STATE__={"user":{"notes":{"value":[[{"noteId":"68cd12340000000001020304","displayTitle":"测试作品","xsecToken":"token+value","cover":{"urlDefault":"http:\u002F\u002Fsns-webpic-qc.xhscdn.com\u002Fcover.webp"}}]]}}}</script>"""
         val creator = CreatorProfile(Platform.XIAOHONGSHU, "user-1", "Alice", "", "https://www.xiaohongshu.com/user/profile/user-1")
@@ -17,6 +41,79 @@ class XiaohongshuParserTest {
         assertEquals("测试作品", page.works.single().title)
         assertEquals("https://sns-webpic-qc.xhscdn.com/cover.webp", page.works.single().coverUrl)
         assertEquals("https://www.xiaohongshu.com/explore/68cd12340000000001020304?xsec_token=token%2Bvalue&xsec_source=pc_user", page.works.single().sourceUrl)
+    }
+
+    @Test
+    fun rejects32CharacterProfilePlaceholderWhenCardOmitsItsOwnToken() {
+        val id = "60f9bfde158b4ae9bd0e81e60184bfb4"
+        val html = """<script>window.__INITIAL_STATE__={"user":{"notes":{"value":[[{"id":"$id","displayTitle":"当前作品","cover":{"urlDefault":"https:\u002F\u002Fsns-webpic-qc.xhscdn.com\u002Fcover.webp"}}]]}}}</script>"""
+        val creator = CreatorProfile(
+            Platform.XIAOHONGSHU,
+            "user-1",
+            "Alice",
+            "",
+            "https://www.xiaohongshu.com/user/profile/user-1?xsec_token=profile%2Btoken",
+        )
+
+        assertTrue(XiaohongshuCreatorPageNormalizer.normalize(html, creator).works.isEmpty())
+    }
+
+    @Test
+    fun accepts32CharacterNoteWhenCardCarriesItsOwnToken() {
+        val id = "60f9bfde158b4ae9bd0e81e60184bfb4"
+        val html = """<script>window.__INITIAL_STATE__={"user":{"notes":{"value":[[{"id":"$id","displayTitle":"当前作品","xsecToken":"card+token","cover":{"urlDefault":"https:\u002F\u002Fsns-webpic-qc.xhscdn.com\u002Fcover.webp"}}]]}}}</script>"""
+        val creator = CreatorProfile(
+            Platform.XIAOHONGSHU,
+            "user-1",
+            "Alice",
+            "",
+            "https://www.xiaohongshu.com/user/profile/user-1?xsec_token=profile%2Btoken",
+        )
+
+        val work = XiaohongshuCreatorPageNormalizer.normalize(html, creator).works.single()
+
+        assertEquals(id, work.id)
+        assertTrue(work.sourceUrl.contains("xsec_token=card%2Btoken"))
+    }
+
+    @Test
+    fun ignoresProfileCardsWithoutRealNoteIdsInsteadOfInventingClickableSources() {
+        val html = """<script>window.__INITIAL_STATE__={"user":{"notes":{"value":[[{"id":"","noteCard":{"noteId":"","displayTitle":"卡片标题","cover":{"urlDefault":"https://sns-webpic-qc.xhscdn.com/card.webp"}}}]]}}}</script>"""
+        val creator = CreatorProfile(Platform.XIAOHONGSHU, "user-1", "Alice", "", "https://www.xiaohongshu.com/user/profile/user-1")
+
+        val page = XiaohongshuCreatorPageNormalizer.normalize(html, creator)
+
+        assertTrue(page.works.isEmpty())
+    }
+
+    @Test
+    fun restoresEachNoteIdFromItsOwnEncodedCoverWithoutCrossPairingMetadata() {
+        val firstId = "68cd12340000000001020304"
+        val secondId = "68cd12340000000005060708"
+        val thirdId = "68cd123400000000090a0b0c"
+        val html = """<script>window.__INITIAL_STATE__={"user":{"notes":{"value":[[
+            {"id":"wrapper-not-note-id-000000000000","noteCard":{"noteId":"","displayTitle":"第一张","cover":{"urlPre":"https://img.example/first.webp##c=vp4","fileId":"file%%$firstId"}}},
+            {"id":"wrapper-not-note-id-000001","noteCard":{"noteId":"","displayTitle":"第二张","user":{"avatar":"https://avatar.example/a.jpg#%$secondId"},"cover":{"urlDefault":"https://img.example/second.webp##c=vp6"}}},
+            {"id":"wrapper-not-note-id-000002","noteCard":{"noteId":"","displayTitle":"第三张","cover":{"urlDefault":"https://img.example/third.webp##c=vp1","traceId":"trace#$thirdId"}}}
+        ]]}}}</script>"""
+        val creator = CreatorProfile(Platform.XIAOHONGSHU, "user-1", "Alice", "", "https://www.xiaohongshu.com/user/profile/user-1")
+
+        val works = XiaohongshuCreatorPageNormalizer.normalize(html, creator).works
+
+        assertEquals(listOf(firstId, secondId, thirdId), works.map { it.id })
+        assertEquals(listOf("第一张", "第二张", "第三张"), works.map { it.title })
+        assertEquals(
+            listOf(
+                "https://img.example/first.webp",
+                "https://img.example/second.webp",
+                "https://img.example/third.webp",
+            ),
+            works.map { it.coverUrl },
+        )
+        assertEquals(
+            listOf(firstId, secondId, thirdId).map { "https://www.xiaohongshu.com/explore/$it" },
+            works.map { it.sourceUrl },
+        )
     }
 
     @Test

@@ -8,6 +8,46 @@ import java.net.URL
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
 
+private fun isXiaohongshuNoteId(value: String): Boolean =
+    value.matches(Regex("^[0-9a-fA-F]{24}$")) ||
+        value.matches(Regex("^[0-9a-fA-F]{32}$"))
+
+private fun isUsableProfileNote(id: String, token: String): Boolean =
+    isXiaohongshuNoteId(id) && (id.length == 24 || token.isNotBlank())
+
+private fun embeddedNoteId(value: String, marker: String): String? {
+    val markerIndex = value.lastIndexOf(marker)
+    if (markerIndex < 0) return null
+    val start = markerIndex + marker.length
+    return Regex("^(?:[0-9a-fA-F]{32}|[0-9a-fA-F]{24})(?![0-9a-fA-F])")
+        .find(value.substring(start))?.value?.takeIf(::isXiaohongshuNoteId)
+}
+
+private fun recoverEncodedNoteId(note: JSONObject): String? {
+    val cover = note.optJSONObject("cover") ?: return null
+    val user = note.optJSONObject("user")
+    val urlPre = cover.optString("urlPre")
+    val urlDefault = cover.optString("urlDefault")
+    val recovered = when {
+        urlPre.endsWith("##c=vp4") -> embeddedNoteId(cover.optString("fileId"), "%%")
+        urlDefault.endsWith("##c=vp6") -> embeddedNoteId(user?.optString("avatar").orEmpty(), "#%")
+        urlDefault.endsWith("##c=vp1") -> embeddedNoteId(cover.optString("traceId"), "#")
+        else -> null
+    }
+    return recovered
+}
+
+private fun findNoteId(note: JSONObject, parent: JSONObject? = null): String? {
+    val candidates = sequenceOf(
+        note.optString("noteId"), note.optString("note_id"), note.optString("id"),
+        parent?.optString("noteId").orEmpty(), parent?.optString("note_id").orEmpty(),
+        parent?.optString("id").orEmpty(),
+    )
+    return candidates.firstOrNull(::isXiaohongshuNoteId)
+        ?: recoverEncodedNoteId(note)
+        ?: parent?.let(::recoverEncodedNoteId)
+}
+
 internal object XiaohongshuCreatorPageNormalizer {
     fun normalize(html: String, creator: CreatorProfile): DouyinCreatorPage {
         val state = extractAssignedJson(html, "window.__INITIAL_STATE__")
@@ -23,7 +63,6 @@ internal object XiaohongshuCreatorPageNormalizer {
             // its own noteCard object.
             collectFeedCards(state, works, creator.profileUrl)
         }
-        if (works.isEmpty()) collectRawProfileCards(html, works, creator.profileUrl)
         if (works.isEmpty()) collectLegacyLinks(html, works)
         return DouyinCreatorPage(creator, works.values.toList(), 0L, false)
     }
@@ -31,24 +70,18 @@ internal object XiaohongshuCreatorPageNormalizer {
     private fun collectNotes(value: Any?, result: LinkedHashMap<String, DouyinCreatorWork>, profileUrl: String) {
         when (value) {
             is JSONObject -> {
-                val rawId = value.optString("noteId").ifBlank { value.optString("note_id") }
-                    .ifBlank { value.optString("id") }
-                val id = rawId.takeIf { it.matches(Regex("[A-Za-z0-9_-]{8,}")) }
-                    ?: value.optString("displayTitle").takeIf(String::isNotBlank)?.let { "profile-${result.size + 1}" }
+                val id = findNoteId(value)
                 if (id != null) {
                     val title = value.optString("displayTitle").ifBlank { value.optString("title") }
                         .ifBlank { value.optString("desc") }
                     val cover = findCoverUrl(value)
-                    val token = value.optString("xsecToken").ifBlank { value.optString("xsec_token") }
-                    val source = if (rawId.matches(Regex("[A-Za-z0-9_-]{8,}"))) buildString {
-                        append("https://www.xiaohongshu.com/explore/").append(id)
-                        if (token.isNotBlank()) {
-                            append("?xsec_token=")
-                            append(URLEncoder.encode(token, StandardCharsets.UTF_8.name()))
-                            append("&xsec_source=pc_user")
-                        }
-                    } else profileUrl
-                    result.putIfAbsent(id, DouyinCreatorWork(id, title, cover, source, 1, false))
+                    val token = value.optString("xsecToken")
+                        .ifBlank { value.optString("xsec_token") }
+
+                    if (isUsableProfileNote(id, token)) {
+                        val source = buildWorkUrl(id, token, profileUrl)
+                        result.putIfAbsent(id, DouyinCreatorWork(id, title, cover, source, 1, false))
+                    }
                 }
                 value.keys().forEach { key -> collectNotes(value.opt(key), result, profileUrl) }
             }
@@ -73,30 +106,26 @@ internal object XiaohongshuCreatorPageNormalizer {
             is JSONObject -> {
                 val card = value.optJSONObject("noteCard")
                 if (card != null && card.optString("displayTitle").isNotBlank()) {
-                    val rawId = card.optString("noteId").ifBlank { value.optString("noteId") }
-                        .ifBlank { value.optString("id") }
-                    val id = rawId.takeIf { it.matches(Regex("[A-Za-z0-9_-]{8,}")) }
-                        ?: "profile-${result.size + 1}"
-                    val token = card.optString("xsecToken").ifBlank { value.optString("xsecToken") }
-                    val source = if (rawId.matches(Regex("[A-Za-z0-9_-]{8,}"))) buildString {
-                        append("https://www.xiaohongshu.com/explore/").append(id)
-                        if (token.isNotBlank()) {
-                            append("?xsec_token=")
-                            append(URLEncoder.encode(token, StandardCharsets.UTF_8.name()))
-                            append("&xsec_source=pc_user")
+                    val id = findNoteId(card, value)
+                    if (id != null) {
+                        val token = card.optString("xsecToken")
+                            .ifBlank { value.optString("xsecToken") }
+
+                        if (isUsableProfileNote(id, token)) {
+                            val source = buildWorkUrl(id, token, profileUrl)
+                            result.putIfAbsent(
+                                id,
+                                DouyinCreatorWork(
+                                    id = id,
+                                    title = card.optString("displayTitle"),
+                                    coverUrl = findCoverUrl(card),
+                                    sourceUrl = source,
+                                    mediaCount = 1,
+                                    isGallery = card.optString("type").equals("video", ignoreCase = true),
+                                ),
+                            )
                         }
-                    } else profileUrl
-                    result.putIfAbsent(
-                        id,
-                        DouyinCreatorWork(
-                            id = id,
-                            title = card.optString("displayTitle"),
-                            coverUrl = findCoverUrl(card),
-                            sourceUrl = source,
-                            mediaCount = 1,
-                            isGallery = card.optString("type").equals("video", ignoreCase = true),
-                        ),
-                    )
+                    }
                 }
                 value.keys().forEach { key -> collectFeedCards(value.opt(key), result, profileUrl) }
             }
@@ -127,13 +156,14 @@ internal object XiaohongshuCreatorPageNormalizer {
         )
             .firstOrNull(String::isNotBlank)
             .orEmpty()
+            .replace(Regex("##c=vp[146]$"), "")
             .replace("\\u002F", "/")
             .replace("\\/", "/")
             .replace(Regex("^http://", RegexOption.IGNORE_CASE), "https://")
     }
 
     private fun collectLegacyLinks(html: String, result: LinkedHashMap<String, DouyinCreatorWork>) {
-        Regex("/(?:explore|discovery/item)/([A-Za-z0-9_-]{8,})", RegexOption.IGNORE_CASE)
+        Regex("/(?:explore|discovery/item)/((?:[0-9a-fA-F]{24}|[0-9a-fA-F]{32}))(?:[?\"'\\s]|$)", RegexOption.IGNORE_CASE)
             .findAll(html)
             .map { it.groupValues[1] }
             .distinct()
@@ -142,27 +172,19 @@ internal object XiaohongshuCreatorPageNormalizer {
             }
     }
 
-    /** Some XHS responses contain the rendered cards but omit/relocate the state.notes node. */
-    private fun collectRawProfileCards(
-        html: String,
-        result: LinkedHashMap<String, DouyinCreatorWork>,
-        profileUrl: String,
-    ) {
-        val titleRegex = Regex("\\\"displayTitle\\\"\\s*:\\s*\\\"((?:\\\\.|[^\\\"])*)\\\"")
-        titleRegex.findAll(html).forEachIndexed { index, match ->
-            val title = match.groupValues[1]
-                .replace("\\\\\\\"", "\\\"")
-                .replace("\\\\n", " ")
-                .trim()
-            if (title.isBlank()) return@forEachIndexed
-            val window = html.substring(match.range.last, minOf(html.length, match.range.last + 3500))
-            val cover = Regex("\\\"urlDefault\\\"\\s*:\\s*\\\"([^\\\"]+)").find(window)
-                ?.groupValues?.get(1).orEmpty()
-                .replace("\\u002F", "/")
-                .replace("\\/", "/")
-                .replace(Regex("^http://", RegexOption.IGNORE_CASE), "https://")
-            val id = "profile-${index + 1}"
-            result.putIfAbsent(id, DouyinCreatorWork(id, title, cover, profileUrl, 1, false))
+    private fun buildWorkUrl(id: String, token: String, profileUrl: String): String = buildString {
+        append("https://www.xiaohongshu.com/explore/").append(id)
+        var hasQuery = false
+        if (token.isNotBlank()) {
+            append("?xsec_token=")
+            append(URLEncoder.encode(token, StandardCharsets.UTF_8.name()))
+            append("&xsec_source=pc_user")
+            hasQuery = true
+        }
+        if (profileUrl.contains("xsec_token=", ignoreCase = true)) {
+            append(if (hasQuery) '&' else '?')
+            append("xhs_profile=")
+            append(URLEncoder.encode(profileUrl, StandardCharsets.UTF_8.name()))
         }
     }
 
@@ -187,11 +209,6 @@ internal class XiaohongshuCreatorRepository(private val context: Context) {
                     append("&xsec_source=pc_user")
                 }
             }
-        }
-        if (android.os.Build.FINGERPRINT.contains("generic", ignoreCase = true) ||
-            android.os.Build.MODEL.contains("sdk", ignoreCase = true)
-        ) {
-            loadFromLocalBridge(profileUrl, creator)?.takeIf { it.works.size > 1 }?.let { return it }
         }
         val connection = (URL(profileUrl).openConnection() as HttpURLConnection).apply {
             instanceFollowRedirects = true; connectTimeout = 12_000; readTimeout = 20_000
@@ -228,21 +245,4 @@ internal class XiaohongshuCreatorRepository(private val context: Context) {
         } finally { connection.disconnect() }
     }
 
-    private fun loadFromLocalBridge(profileUrl: String, creator: CreatorProfile): DouyinCreatorPage? = runCatching {
-        val bridgeUrl = "http://10.0.2.2:18765/profile?url=" +
-            URLEncoder.encode(profileUrl, StandardCharsets.UTF_8.name())
-        val connection = (URL(bridgeUrl).openConnection() as HttpURLConnection).apply {
-            connectTimeout = 2_000
-            readTimeout = 30_000
-        }
-        try {
-            if (connection.responseCode !in 200..299) return@runCatching null
-            XiaohongshuCreatorPageNormalizer.normalize(
-                connection.inputStream.bufferedReader().use { it.readText() },
-                creator,
-            )
-        } finally {
-            connection.disconnect()
-        }
-    }.getOrNull()
 }

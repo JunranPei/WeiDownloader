@@ -290,7 +290,9 @@ class SettingsActivity : ComponentActivity() {
             }
             Platform.XIAOHONGSHU -> {
                 val loggedIn = XiaohongshuSession.isSignedIn()
-                loginStatus.text = getString(if (loggedIn) R.string.login_active else R.string.login_inactive)
+                loginStatus.text = getString(
+                    if (loggedIn) R.string.xiaohongshu_login_active else R.string.xiaohongshu_login_inactive,
+                )
                 loginButton.text = getString(if (loggedIn) R.string.login_again else R.string.login_xiaohongshu)
             }
             Platform.TELEGRAM -> Unit

@@ -22,6 +22,8 @@ class LoginActivity : Activity() {
     private lateinit var webView: WebView
     private lateinit var doneButton: MaterialButton
     private val handler = android.os.Handler(android.os.Looper.getMainLooper())
+    private var xiaohongshuValidationPending = false
+    private var lastXiaohongshuStatus: Boolean? = null
     private val platformKey by lazy { intent.getStringExtra(EXTRA_PLATFORM).orEmpty() }
     private val platform by lazy {
         Platform.entries.firstOrNull { it.key == platformKey } ?: Platform.WEIBO
@@ -33,6 +35,7 @@ class LoginActivity : Activity() {
         configureTransparentSystemBars()
         setContentView(R.layout.activity_login)
         doneButton = findViewById(R.id.loginDoneButton)
+        if (platform == Platform.XIAOHONGSHU) doneButton.isEnabled = false
         webView = findViewById<WebView>(R.id.loginWebView).apply {
             settings.javaScriptEnabled = true
             settings.domStorageEnabled = true
@@ -53,7 +56,8 @@ class LoginActivity : Activity() {
                 }
 
                 override fun onPageStarted(view: WebView, url: String, favicon: android.graphics.Bitmap?) {
-                    Log.d("LoginActivity", "onPageStarted platform=${platform.key} url=$url")
+                    Log.d("LoginActivity", "onPageStarted platform=${platform.key} path=${android.net.Uri.parse(url).path}")
+                    if (platform == Platform.XIAOHONGSHU) doneButton.isEnabled = false
                     super.onPageStarted(view, url, favicon)
                 }
 
@@ -62,7 +66,7 @@ class LoginActivity : Activity() {
                 }
 
                 override fun onPageFinished(view: WebView, url: String) {
-                    Log.d("LoginActivity", "onPageFinished url=$url title=${view.title}")
+                    Log.d("LoginActivity", "onPageFinished path=${android.net.Uri.parse(url).path}")
                     refreshLoginState()
                 }
 
@@ -71,7 +75,7 @@ class LoginActivity : Activity() {
                     request: WebResourceRequest,
                     errorResponse: android.webkit.WebResourceResponse,
                 ) {
-                    if (request.isForMainFrame) Log.d("LoginActivity", "httpError url=${request.url} status=${errorResponse.statusCode}")
+                    if (request.isForMainFrame) Log.d("LoginActivity", "httpError path=${request.url.path} status=${errorResponse.statusCode}")
                 }
 
                 override fun onReceivedError(
@@ -79,7 +83,7 @@ class LoginActivity : Activity() {
                     request: WebResourceRequest,
                     error: WebResourceError,
                 ) {
-                    Log.d("LoginActivity", "receivedError url=${request.url} main=${request.isForMainFrame} code=${error.errorCode} desc=${error.description}")
+                    Log.d("LoginActivity", "receivedError path=${request.url.path} main=${request.isForMainFrame} code=${error.errorCode} desc=${error.description}")
                     if (request.isForMainFrame && platform == Platform.XIAOHONGSHU &&
                         request.url.host == "creator.rednote.com"
                     ) view.loadUrl("https://www.rednote.com/")
@@ -105,6 +109,10 @@ class LoginActivity : Activity() {
         }
         doneButton.setOnClickListener {
             CookieManager.getInstance().flush()
+            if (platform == Platform.XIAOHONGSHU && !XiaohongshuSession.isSignedIn()) {
+                refreshLoginState()
+                return@setOnClickListener
+            }
             setResult(RESULT_OK)
             finish()
         }
@@ -134,6 +142,7 @@ class LoginActivity : Activity() {
     }
 
     private fun refreshLoginState() {
+        CookieManager.getInstance().flush()
         val signedIn = when (platform) {
             Platform.WEIBO -> WeiboSession.isSignedIn()
             Platform.DOUYIN -> DouyinSession.isSignedIn()
@@ -143,6 +152,22 @@ class LoginActivity : Activity() {
             Platform.INSTAGRAM -> false
             Platform.XIAOHONGSHU -> XiaohongshuSession.isSignedIn()
             Platform.REDDIT -> false
+        }
+        if (platform == Platform.XIAOHONGSHU) {
+            if (!xiaohongshuValidationPending) {
+                xiaohongshuValidationPending = true
+                XiaohongshuSession.verifyFromPage(webView) { verified ->
+                    xiaohongshuValidationPending = false
+                    if (isFinishing || isDestroyed) return@verifyFromPage
+                    doneButton.isEnabled = verified
+                    doneButton.setText(if (verified) R.string.login_done_ready else R.string.login_done_waiting)
+                    if (lastXiaohongshuStatus != verified) {
+                        Log.i("LoginActivity", "xiaohongshu serverVerified=$verified path=${android.net.Uri.parse(webView.url.orEmpty()).path}")
+                        lastXiaohongshuStatus = verified
+                    }
+                }
+            }
+            return
         }
         doneButton.setText(if (signedIn) R.string.login_done_ready else R.string.login_done_waiting)
     }
@@ -179,7 +204,7 @@ class LoginActivity : Activity() {
         private const val TELEGRAM_LOGIN_URL = "https://web.telegram.org/a/"
         private const val X_LOGIN_URL = "https://x.com/i/flow/login"
         private const val INSTAGRAM_LOGIN_URL = "https://www.instagram.com/accounts/login/"
-        private const val XIAOHONGSHU_LOGIN_URL = "https://www.rednote.com/login"
+        private const val XIAOHONGSHU_LOGIN_URL = "https://www.xiaohongshu.com/explore"
         private const val DESKTOP_WEB_USER_AGENT =
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
                 "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"

@@ -162,6 +162,10 @@ class DouyinCreatorActivity : Activity() {
                     startWebFallback()
                     return@setOnClickListener
                 }
+                if (creator.platform == Platform.XIAOHONGSHU) {
+                    loadMoreFromXiaohongshu()
+                    return@setOnClickListener
+                }
             }
             loadMore()
         }
@@ -239,61 +243,55 @@ class DouyinCreatorActivity : Activity() {
     }
 
     private fun loadMoreFromXiaohongshu() {
-        if (xiaohongshuLoaded) return
+        if (loading) return
         loading = true
         if (adapter.itemCount == 0) showLoading()
-        executor.execute {
-            val result = runCatching { xiaohongshuRepository.loadPage(creator) }
-            runOnUiThread {
-                loading = false
-                result.fold(
-                    { page ->
-                        val hasIndividualXhsLinks = page.works.isNotEmpty() &&
-                            page.works.all { work ->
-                                work.sourceUrl.contains("/explore/") ||
-                                    work.sourceUrl.contains("/discovery/item/")
-                            }
-                        if (page.works.isNotEmpty() && (page.creator.platform != Platform.XIAOHONGSHU || hasIndividualXhsLinks)) {
-                            XiaohongshuCreatorWebLoader.saveCachedWorks(this, page.creator, page.works)
-                            xiaohongshuLoaded = true
-                            bindCreator(page.creator)
-                            adapter.append(page.works)
-                            hasMore = false
-                            state.visibility = View.GONE
-                        } else {
-                            startXiaohongshuWebFallback()
-                        }
-                    },
-                    { startXiaohongshuWebFallback() },
-                )
-            }
+        val loader = xiaohongshuWebLoader
+        if (xiaohongshuLoaded && loader != null) {
+            loader.loadMore(::handleXiaohongshuResult)
+        } else {
+            startXiaohongshuWebFallback()
         }
     }
 
     private fun startXiaohongshuWebFallback() {
         loading = true
-        if (adapter.itemCount == 0) showLoading() else state.visibility = View.GONE
+        if (adapter.itemCount == 0) showLoading()
         xiaohongshuWebLoader?.close()
-        xiaohongshuWebLoader = XiaohongshuCreatorWebLoader(this, creator).also { loader ->
-            loader.load { result ->
-                runOnUiThread {
-                    loading = false
-                    xiaohongshuLoaded = true
-                    result.fold(
-                        { page ->
-                            bindCreator(page.creator)
-                            adapter.append(page.works)
-                            hasMore = false
-                            if (adapter.itemCount > 0) state.visibility = View.GONE else showMessage(R.string.creator_empty, false)
-                        },
-                        {
-                            hasMore = false
-                            showMessage(R.string.creator_load_failed, true)
-                        },
-                    )
-                }
-            }
+        xiaohongshuWebLoader = XiaohongshuCreatorWebLoader(this, creator).also {
+            it.load(::handleXiaohongshuResult)
         }
+    }
+
+    private fun handleXiaohongshuResult(result: Result<DouyinCreatorPage>) {
+        loading = false
+        result.fold(
+            { page ->
+                xiaohongshuLoaded = true
+                bindCreator(page.creator)
+                adapter.append(page.works)
+                hasMore = page.hasMore
+                Log.i(LOG_TAG, "Xiaohongshu displayed=${adapter.itemCount} hasMore=$hasMore")
+                if (adapter.itemCount > 0) state.visibility = View.GONE
+                else showMessage(R.string.creator_empty, false)
+            },
+            { error ->
+                val message = when (error) {
+                    is XiaohongshuCreatorLoginRequiredException -> R.string.xiaohongshu_creator_login_required
+                    else -> R.string.xiaohongshu_creator_unavailable
+                }
+                if (adapter.itemCount == 0) {
+                    xiaohongshuLoaded = false
+                    hasMore = false
+                    showMessage(message, true)
+                } else {
+                    // Retain already loaded cards; a failed next page is not the end of the feed.
+                    hasMore = true
+                    Toast.makeText(this, message, Toast.LENGTH_LONG).show()
+                }
+                Log.w(LOG_TAG, "Xiaohongshu creator failed", error)
+            },
+        )
     }
 
     private fun loadMoreFromX() {

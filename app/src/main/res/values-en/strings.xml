@@ -230,4 +230,8 @@
     <string name="reddit_default_author">Reddit user</string>
     <string name="reddit_http_error">Reddit returned HTTP %1$d.</string>
     <string name="reddit_network_error">Could not read Reddit: %1$s</string>
+    <string name="xiaohongshu_login_active">Xiaohongshu sign-in verified by the website.</string>
+    <string name="xiaohongshu_login_inactive">Xiaohongshu sign-in is not verified. Open the sign-in page to check.</string>
+    <string name="xiaohongshu_creator_login_required">Xiaohongshu requires sign-in. Please sign in through Settings and retry.</string>
+    <string name="xiaohongshu_creator_unavailable">Could not load more posts. Please retry; loaded posts are kept.</string>
 </resources>

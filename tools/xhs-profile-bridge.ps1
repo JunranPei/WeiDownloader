@@ -23,7 +23,7 @@ try {
                 continue
             }
             $page = Invoke-WebRequest -Uri $target -MaximumRedirection 10 -UseBasicParsing
-            $bytes = [System.Text.Encoding]::UTF8.GetBytes($page.Content)
+            $bytes = [System.Text.Encoding]::UTF8.GetBytes([string]$page.Content)
             $context.Response.StatusCode = 200
             $context.Response.ContentType = 'text/html; charset=utf-8'
             $context.Response.ContentLength64 = $bytes.Length
