@@ -24,6 +24,7 @@ class LoginActivity : Activity() {
     private val handler = android.os.Handler(android.os.Looper.getMainLooper())
     private var xiaohongshuValidationPending = false
     private var lastXiaohongshuStatus: Boolean? = null
+    private var weiboValidationPending = false
     private val platformKey by lazy { intent.getStringExtra(EXTRA_PLATFORM).orEmpty() }
     private val platform by lazy {
         Platform.entries.firstOrNull { it.key == platformKey } ?: Platform.WEIBO
@@ -35,7 +36,7 @@ class LoginActivity : Activity() {
         configureTransparentSystemBars()
         setContentView(R.layout.activity_login)
         doneButton = findViewById(R.id.loginDoneButton)
-        if (platform == Platform.XIAOHONGSHU) doneButton.isEnabled = false
+        if (platform == Platform.XIAOHONGSHU || platform == Platform.WEIBO) doneButton.isEnabled = false
         webView = findViewById<WebView>(R.id.loginWebView).apply {
             settings.javaScriptEnabled = true
             settings.domStorageEnabled = true
@@ -90,25 +91,34 @@ class LoginActivity : Activity() {
                 }
             }
             setInitialScale(0)
-            CookieManager.getInstance().also { manager ->
-                manager.setAcceptCookie(true)
-                manager.setAcceptThirdPartyCookies(this, true)
+            val loginUrl = when (platform) {
+                Platform.WEIBO -> WEIBO_LOGIN_URL
+                Platform.DOUYIN -> DOUYIN_LOGIN_URL
+                Platform.BILIBILI -> BILIBILI_LOGIN_URL
+                Platform.TELEGRAM -> TELEGRAM_LOGIN_URL
+                Platform.X -> X_LOGIN_URL
+                Platform.INSTAGRAM -> INSTAGRAM_LOGIN_URL
+                Platform.XIAOHONGSHU -> XIAOHONGSHU_LOGIN_URL
+                Platform.REDDIT -> "https://www.reddit.com/"
             }
-            loadUrl(
-                when (platform) {
-                    Platform.WEIBO -> WEIBO_LOGIN_URL
-                    Platform.DOUYIN -> DOUYIN_LOGIN_URL
-                    Platform.BILIBILI -> BILIBILI_LOGIN_URL
-                    Platform.TELEGRAM -> TELEGRAM_LOGIN_URL
-                    Platform.X -> X_LOGIN_URL
-                    Platform.INSTAGRAM -> INSTAGRAM_LOGIN_URL
-                    Platform.XIAOHONGSHU -> XIAOHONGSHU_LOGIN_URL
-                    Platform.REDDIT -> "https://www.reddit.com/"
-                },
-            )
+            if (platform == Platform.WEIBO) {
+                val loginView = this
+                WeiboSession.prepareLogin {
+                    if (!isFinishing && !isDestroyed) {
+                        CookieManager.getInstance().setAcceptThirdPartyCookies(loginView, true)
+                        loginView.loadUrl(loginUrl)
+                    }
+                }
+            } else {
+                CookieManager.getInstance().also { manager ->
+                    manager.setAcceptCookie(true)
+                    manager.setAcceptThirdPartyCookies(this, true)
+                }
+                loadUrl(loginUrl)
+            }
         }
         doneButton.setOnClickListener {
-            CookieManager.getInstance().flush()
+            if (platform == Platform.WEIBO) WeiboSession.flushCookies() else CookieManager.getInstance().flush()
             if (platform == Platform.XIAOHONGSHU && !XiaohongshuSession.isSignedIn()) {
                 refreshLoginState()
                 return@setOnClickListener
@@ -142,7 +152,7 @@ class LoginActivity : Activity() {
     }
 
     private fun refreshLoginState() {
-        CookieManager.getInstance().flush()
+        if (platform != Platform.WEIBO) CookieManager.getInstance().flush()
         val signedIn = when (platform) {
             Platform.WEIBO -> WeiboSession.isSignedIn()
             Platform.DOUYIN -> DouyinSession.isSignedIn()
@@ -152,6 +162,21 @@ class LoginActivity : Activity() {
             Platform.INSTAGRAM -> false
             Platform.XIAOHONGSHU -> XiaohongshuSession.isSignedIn()
             Platform.REDDIT -> false
+        }
+        if (platform == Platform.WEIBO) {
+            doneButton.isEnabled = signedIn
+            doneButton.setText(if (signedIn) R.string.login_done_ready else R.string.login_done_waiting)
+            if (!weiboValidationPending) {
+                weiboValidationPending = true
+                WeiboSession.refresh(this) { verified ->
+                    weiboValidationPending = false
+                    if (!isFinishing && !isDestroyed) {
+                        doneButton.isEnabled = verified == true
+                        doneButton.setText(if (verified == true) R.string.login_done_ready else R.string.login_done_waiting)
+                    }
+                }
+            }
+            return
         }
         if (platform == Platform.XIAOHONGSHU) {
             if (!xiaohongshuValidationPending) {

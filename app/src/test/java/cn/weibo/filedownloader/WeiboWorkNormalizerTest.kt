@@ -176,7 +176,6 @@ class WeiboWorkNormalizerTest {
 
     private fun normalizer(includeLiveCover: Boolean = false) =
         WeiboWorkNormalizer(
-            cookie = "",
             includeLiveCover = includeLiveCover,
             metadataProbe = object : WeiboMediaMetadataProbe {
                 override fun imageDimensions(url: String): Pair<Int, Int>? = null

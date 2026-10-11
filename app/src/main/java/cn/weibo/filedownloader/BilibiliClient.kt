@@ -47,7 +47,7 @@ internal interface BilibiliOpusPostProvider {
     fun load(link: BilibiliResolvedLink, target: BilibiliLinkTarget.Opus): WeiboPost
 }
 
-/** Loads public UGC metadata and progressive MP4 sources for the requested part. */
+/** Loads UGC metadata and authenticated DASH or progressive sources for the requested part. */
 internal class BilibiliWebVideoPostProvider(
     private val http: BilibiliHttpClient,
     private val context: Context,
@@ -67,51 +67,55 @@ internal class BilibiliWebVideoPostProvider(
         val cid = page?.optLong("cid")?.takeIf { it > 0L } ?: detail.optLong("cid")
         if (cid <= 0L) throw BilibiliException(context.getString(R.string.bilibili_video_source_missing))
 
-        val baseParams = buildMap {
-            if (bvid.isNotBlank()) put("bvid", bvid) else put("avid", aid.toString())
-            put("cid", cid.toString())
-            put("fnval", "0")
-            put("fourk", "1")
-            put("platform", "html5")
-        }
-        val initial = requireData(http.getJson(PLAY_ENDPOINT, baseParams + ("qn" to "127")))
-        val descriptions = qualityDescriptions(initial)
-        val accepted = initial.optJSONArray("accept_quality")?.toIntList().orEmpty()
-            .ifEmpty { listOf(initial.optInt("quality")) }
-            .filter { it > 0 }
-            .distinct()
-            .sortedDescending()
-        val playByQuality = LinkedHashMap<Int, JSONObject>()
-        playByQuality[initial.optInt("quality")] = initial
-        accepted.forEach { requested ->
-            if (requested == initial.optInt("quality")) return@forEach
-            val result = runCatching {
-                requireData(http.getJson(PLAY_ENDPOINT, baseParams + ("qn" to requested.toString())))
-            }.getOrNull() ?: return@forEach
-            playByQuality.putIfAbsent(result.optInt("quality", requested), result)
-        }
-
+        val dashParams = BilibiliPlayRequest.parameters(bvid, aid, cid)
+        val initialDash = requireData(http.getPlayJson(dashParams))
+        val dashVariants = BilibiliDashParser.variants(initialDash, qualityDescriptions(initialDash))
         val segments = LinkedHashMap<Int, MutableList<Pair<Int, MediaVariant>>>()
-        playByQuality.forEach { (quality, data) ->
-            val label = descriptions[quality] ?: qualityLabel(quality)
-            val dimension = page?.optJSONObject("dimension") ?: detail.optJSONObject("dimension")
-            val (width, height) = dimensionsForQuality(quality, dimension)
-            data.optJSONArray("durl")?.forEachObjectIndexed { index, source ->
-                val url = source.optString("url").ifBlank {
-                    source.optJSONArray("backup_url")?.optString(0).orEmpty()
-                }
-                if (url.isBlank()) return@forEachObjectIndexed
-                segments.getOrPut(index) { mutableListOf() } += quality to MediaVariant(
-                    key = label,
-                    url = url,
-                    width = width,
-                    height = height,
-                    bitrate = 0L,
-                )
+        if (dashVariants.isNotEmpty()) {
+            segments[0] = dashVariants.mapIndexed { index, variant ->
+                (dashVariants.size - index) to variant
+            }.toMutableList()
+        } else {
+            val baseParams = dashParams + ("fnval" to "0")
+            val initial = if (initialDash.optJSONArray("durl") != null) initialDash else
+                requireData(http.getJson(PLAY_ENDPOINT, baseParams))
+            val descriptions = qualityDescriptions(initial)
+            val accepted = initial.optJSONArray("accept_quality")?.toIntList().orEmpty()
+                .ifEmpty { listOf(initial.optInt("quality")) }
+                .filter { it > 0 }
+                .distinct()
+                .sortedDescending()
+            val playByQuality = LinkedHashMap<Int, JSONObject>()
+            playByQuality[initial.optInt("quality")] = initial
+            accepted.forEach { requested ->
+                if (requested == initial.optInt("quality")) return@forEach
+                val result = runCatching {
+                    requireData(http.getJson(PLAY_ENDPOINT, baseParams + ("qn" to requested.toString())))
+                }.getOrNull() ?: return@forEach
+                playByQuality.putIfAbsent(result.optInt("quality", requested), result)
             }
-        }
-        if (segments.isEmpty()) {
-            throw BilibiliException(context.getString(R.string.bilibili_video_source_missing))
+
+            playByQuality.forEach { (quality, data) ->
+                val label = descriptions[quality] ?: qualityLabel(quality)
+                val dimension = page?.optJSONObject("dimension") ?: detail.optJSONObject("dimension")
+                val (width, height) = dimensionsForQuality(quality, dimension)
+                data.optJSONArray("durl")?.forEachObjectIndexed { index, source ->
+                    val url = source.optString("url").ifBlank {
+                        source.optJSONArray("backup_url")?.optString(0).orEmpty()
+                    }
+                    if (url.isBlank()) return@forEachObjectIndexed
+                    segments.getOrPut(index) { mutableListOf() } += quality to MediaVariant(
+                        key = label,
+                        url = url,
+                        width = width,
+                        height = height,
+                        bitrate = 0L,
+                    )
+                }
+            }
+            if (segments.isEmpty()) {
+                throw BilibiliException(context.getString(R.string.bilibili_video_source_missing))
+            }
         }
         val postId = bvid.ifBlank { "av$aid" } + if (target.page > 1) "_p${target.page}" else ""
         val thumbnail = detail.optString("pic").toHttps()
@@ -127,6 +131,7 @@ internal class BilibiliWebVideoPostProvider(
                 thumbnailUrl = thumbnail,
                 variants = ranked,
                 selectedVariantKey = selected.key,
+                audioUrl = selected.audioUrl,
             )
         }
         val owner = detail.optJSONObject("owner")

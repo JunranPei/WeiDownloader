@@ -79,7 +79,8 @@
     <string name="login_bilibili">登录哔哩哔哩</string>
     <string name="login_xiaohongshu">登录小红书</string>
     <string name="login_again">重新登录</string>
-    <string name="login_active">已登录；会话仅用于读取您有权限访问的微博。</string>
+    <string name="login_active">已验证微博登录；会话用于读取当前账号有权访问的内容。</string>
+    <string name="weibo_login_unverified">尚未确认有效的微博登录，请打开登录页验证。</string>
     <string name="login_inactive">尚未登录。公开微博仍可识别；登录后可读取当前账号有权访问的更多内容。</string>
     <string name="xiaohongshu_login_active">已登录；会话用于读取当前账号有权访问的小红书作者作品。</string>
     <string name="xiaohongshu_login_inactive">尚未确认有效的小红书登录，请打开登录页完成验证。</string>
@@ -170,6 +171,7 @@
     <string name="network_error">网络连接异常</string>
     <string name="weibo_read_error">读取微博失败：%1$s</string>
     <string name="post_not_returned">微博未返回这条内容，请确认链接有效且当前账号有访问权限。</string>
+    <string name="weibo_post_unavailable">这条微博无法访问，可能已删除或受权限限制。</string>
     <string name="post_id_not_found">未能识别链接中的微博正文或视频 ID。请在微博中选择“复制链接”后重试。</string>
     <string name="url_not_found">没有找到微博链接，请粘贴微博“复制链接”的完整内容。</string>
     <string name="switch_to_weibo">切换到微博下载</string>

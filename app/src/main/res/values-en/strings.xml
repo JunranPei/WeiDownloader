@@ -79,7 +79,8 @@
     <string name="login_bilibili">Sign in to Bilibili</string>
     <string name="login_xiaohongshu">Sign in to Xiaohongshu</string>
     <string name="login_again">Sign in again</string>
-    <string name="login_active">Signed in. This session is only used to read posts you can access.</string>
+    <string name="login_active">Weibo sign-in verified. This session is used to read content available to your account.</string>
+    <string name="weibo_login_unverified">Weibo sign-in is not verified. Open the sign-in page to check.</string>
     <string name="login_inactive">Not signed in. Public posts still work; sign in to access more content available to your account.</string>
     <string name="douyin_login_active">Signed in. This session is used to load complete public creator posts.</string>
     <string name="douyin_login_inactive">Not signed in. Single posts still work; sign in to load complete creator posts.</string>
@@ -166,6 +167,7 @@
     <string name="network_error">Network connection error</string>
     <string name="weibo_read_error">Could not read Weibo: %1$s</string>
     <string name="post_not_returned">Weibo did not return this post. Check the link and your account access.</string>
+    <string name="weibo_post_unavailable">This Weibo post is unavailable. It may have been deleted or access is restricted.</string>
     <string name="post_id_not_found">Could not identify a Weibo post or video ID in this link. Copy the link again from Weibo.</string>
     <string name="url_not_found">No Weibo URL was found. Paste the complete content from Weibo’s “Copy link” action.</string>
     <string name="switch_to_weibo">Switch to Weibo</string>

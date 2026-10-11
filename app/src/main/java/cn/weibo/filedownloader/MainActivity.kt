@@ -608,7 +608,7 @@ class MainActivity : ComponentActivity() {
             try {
                 val includeLiveCover = preferences.getBoolean("live_cover", false)
                 val loaded = when (platform) {
-                    Platform.WEIBO -> WeiboClient(sessionCookie, this, includeLiveCover).loadPost(url)
+                    Platform.WEIBO -> WeiboClient(this, includeLiveCover).loadPost(url)
                     Platform.BILIBILI -> BilibiliClient(sessionCookie, this).loadPost(url)
                     Platform.TELEGRAM -> TelegramClient(this).loadPost(url)
                     Platform.X -> XClient(this).loadPost(url)
@@ -857,7 +857,9 @@ class MainActivity : ComponentActivity() {
     private fun mediaVariantLabel(key: String?): String = when (key) {
         "original" -> getString(R.string.image_variant_original)
         null -> getString(R.string.image_variant_original)
-        else -> key
+        else -> if (platform == Platform.WEIBO) {
+            Regex("(?i)(\\d{3,4})\\s*p").find(key)?.groupValues?.get(1)?.let { "${it}p" } ?: key
+        } else key
     }
 
     private fun mediaTechnicalLabel(item: MediaItem): String {
@@ -960,7 +962,7 @@ class MainActivity : ComponentActivity() {
 
     private fun refreshSession() {
         sessionCookie = when (platform) {
-            Platform.WEIBO -> WeiboSession.cookieHeader()
+            Platform.WEIBO -> "" // Weibo reads each destination's current cookie at request time.
             Platform.DOUYIN -> DouyinSession.cookieHeader()
             Platform.BILIBILI -> BilibiliSession.cookieHeader()
             Platform.TELEGRAM -> ""

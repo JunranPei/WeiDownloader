@@ -8,20 +8,19 @@ import org.json.JSONObject
  * normalization. Platform-specific details live in replaceable modules.
  */
 class WeiboClient(
-    private val cookie: String,
     private val context: Context,
     includeLiveCover: Boolean = false,
 ) {
-    private val http = WeiboHttpClient(cookie, context)
+    private val http = WeiboHttpClient(context)
     private val linkResolver = WeiboLinkResolver(http, context)
-    private val normalizer = WeiboWorkNormalizer(cookie, includeLiveCover)
+    private val normalizer = WeiboWorkNormalizer(includeLiveCover)
     private val statusProviders: List<WeiboStatusDetailProvider> = listOf(
-        WeiboMobileStatusDetailProvider(http),
+        WeiboMobileStatusDetailProvider(http, context),
         WeiboDesktopStatusDetailProvider(http, context),
     )
     private val videoProviders: List<WeiboVideoDetailProvider> = listOf(
-        WeiboComponentVideoDetailProvider.h5(http, cookie, context),
-        WeiboComponentVideoDetailProvider.desktop(http, cookie, context),
+        WeiboComponentVideoDetailProvider.h5(http, context),
+        WeiboComponentVideoDetailProvider.desktop(http, context),
     )
 
     fun loadPost(sharedUrl: String, quality: QualityPreference = QualityPreference.HIGHEST): WeiboPost {
@@ -37,60 +36,48 @@ class WeiboClient(
     }
 
     private fun loadStatusPost(id: String, sourceUrl: String, quality: QualityPreference): WeiboPost {
-        val signedIn = cookie.contains("SUB=")
         val defaultAuthor = context.getString(R.string.default_author)
-        var lastFailure: Exception? = null
-        for (provider in statusProviders) {
-            val data = try {
-                provider.load(id)
-            } catch (error: Exception) {
-                lastFailure = error
-                null
-            } ?: continue
-            normalizer.normalizeStatus(data, id, quality, defaultAuthor)?.let { return it.toPost(sourceUrl) }
-
-            // Some status responses retain only the video object id while their
-            // signed media URL fields are temporarily empty. Resolve that object
-            // through the independent video-component providers before moving on.
-            statusVideoObjectId(data)?.let { objectId ->
-                try {
-                    val playInfo = loadVideoFromProviders(objectId)
-                    normalizer.normalizeVideoComponent(playInfo, objectId, quality, defaultAuthor)
-                        ?.let { return it.toPost(sourceUrl) }
-                } catch (error: Exception) {
-                    lastFailure = error
+        val components = HashMap<String, WeiboWorkData?>()
+        fun component(objectId: String): WeiboWorkData? = if (components.containsKey(objectId)) components[objectId]
+            else runCatching { loadVideoWork(objectId, quality, resolveStatus = false) }.getOrNull()
+                .also { components[objectId] = it }
+        val work = WeiboStatusWorkResolver.resolve(
+            providers = statusProviders.map { provider -> { provider.load(id) } },
+            normalize = { data ->
+                normalizer.normalizeStatus(data, id, quality, defaultAuthor) ?: run {
+                    val fallback = normalizer.videoObjectIds(data).mapNotNull(::component).flatMap { it.media }
+                    normalizer.normalizeStatus(data, id, quality, defaultAuthor, fallback)
                 }
-            }
-        }
-        if (!signedIn) {
-            throw WeiboLoginRequiredException(context.getString(R.string.client_login_required))
-        }
-        throw lastFailure ?: WeiboException(context.getString(R.string.no_media))
+            },
+        ) ?: throw WeiboException(context.getString(R.string.no_media))
+        return WeiboVideoWorkResolver.upgradeVideos(work, ::component).toPost(sourceUrl)
     }
 
     private fun loadVideoObject(objectId: String, sourceUrl: String, quality: QualityPreference): WeiboPost {
-        val playInfo = loadVideoFromProviders(objectId)
-        val work = normalizer.normalizeVideoComponent(
-            playInfo = playInfo,
-            objectId = objectId,
-            quality = quality,
-            defaultAuthor = context.getString(R.string.default_author),
-        ) ?: throw WeiboException(context.getString(R.string.no_media))
+        val work = loadVideoWork(objectId, quality, resolveStatus = true)
+            ?: throw WeiboException(context.getString(R.string.no_media))
         return work.toPost(sourceUrl)
     }
 
-    private fun loadVideoFromProviders(objectId: String): JSONObject {
-        var lastFailure: Exception? = null
-        for (provider in videoProviders) {
-            val detail = try {
-                provider.load(objectId)
-            } catch (error: Exception) {
-                lastFailure = error
-                null
-            }
-            if (detail != null) return detail
-        }
-        throw lastFailure ?: WeiboException(context.getString(R.string.no_media))
+    private fun loadVideoWork(objectId: String, quality: QualityPreference, resolveStatus: Boolean): WeiboWorkData? {
+        val defaultAuthor = context.getString(R.string.default_author)
+        val statuses = HashMap<String, WeiboWorkData?>()
+        return WeiboVideoWorkResolver.resolve(
+            providers = videoProviders.map { provider -> { provider.load(objectId) } },
+            resolveStatus = { mid ->
+                if (!resolveStatus) null
+                else if (statuses.containsKey(mid)) statuses[mid]
+                else loadVideoStatus(mid, objectId, quality, defaultAuthor).also { statuses[mid] = it }
+            },
+            normalizeComponent = { detail -> normalizer.normalizeVideoComponent(detail, objectId, quality, defaultAuthor) },
+        )
+    }
+
+    private fun loadVideoStatus(mid: String, objectId: String, quality: QualityPreference, defaultAuthor: String): WeiboWorkData? {
+        return WeiboStatusWorkResolver.resolve(
+            statusProviders.map { provider -> { provider.load(mid) } },
+            { normalizer.normalizeVideoStatus(it, mid, objectId, quality, defaultAuthor) },
+        )
     }
 
     internal fun parseMedia(
@@ -98,13 +85,6 @@ class WeiboClient(
         quality: QualityPreference,
         postId: String = data.optString("id"),
     ): List<MediaItem> = normalizer.parseMedia(data, quality, postId)
-
-    private fun statusVideoObjectId(data: JSONObject): String? = sequenceOf(
-        data.optJSONObject("page_info")?.optString("object_id"),
-        data.optString("object_id"),
-        data.optString("fid"),
-    ).mapNotNull { it?.trim()?.takeIf(String::isNotBlank) }
-        .firstOrNull { it.matches(Regex("[0-9]+:[A-Za-z0-9]+")) }
 
     private fun WeiboWorkData.toPost(sourceUrl: String): WeiboPost = WeiboPost(
         id = id,

@@ -73,6 +73,12 @@ class WeiboLinkParserTest {
     }
 
     @Test
+    fun distinguishesSharedVideoObjectFromItsOriginalStatus() {
+        assertStatus("https://weibo.com/6166452387/5352524651433064", "5352524651433064")
+        assertVideo("https://video.weibo.com/show?fid=1034:5352519325384790", "1034:5352519325384790")
+    }
+
+    @Test
     fun rejectsNonWeiboAndNonPostPages() {
         assertNull(WeiboLinkParser.targetFromUrl("https://example.com/123/456"))
         assertNull(WeiboLinkParser.targetFromUrl("https://weibo.com/hot/search"))

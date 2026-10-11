@@ -41,12 +41,16 @@ data class MediaItem(
     /** Source variants returned for this image, including Weibo's /large/ original. */
     val variants: List<MediaVariant> = emptyList(),
     val selectedVariantKey: String? = null,
+    /** Separate DASH audio track, downloaded and muxed with the selected video. */
+    val audioUrl: String = "",
+    /** Weibo component identity; keeps mixed-post enhancements on the right video. */
+    val videoObjectId: String = "",
 ) {
     val stableId: String get() = "${type.name}:$postId:$ordinal"
 
     fun selectVariant(key: String): MediaItem {
         val variant = variants.firstOrNull { it.key == key } ?: return this
-        return copy(url = variant.url, selectedVariantKey = variant.key)
+        return copy(url = variant.url, selectedVariantKey = variant.key, audioUrl = variant.audioUrl)
     }
 
     fun suggestedFileName(): String {
@@ -102,6 +106,7 @@ data class MediaVariant(
     val width: Int = 0,
     val height: Int = 0,
     val bitrate: Long = 0L,
+    val audioUrl: String = "",
 ) {
     val pixelArea: Long get() = width.toLong() * height.toLong()
 }

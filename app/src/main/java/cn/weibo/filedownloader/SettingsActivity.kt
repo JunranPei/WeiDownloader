@@ -271,8 +271,18 @@ class SettingsActivity : ComponentActivity() {
         when (platform) {
             Platform.WEIBO -> {
                 val loggedIn = WeiboSession.isSignedIn()
-                loginStatus.text = getString(if (loggedIn) R.string.login_active else R.string.login_inactive)
+                loginStatus.text = getString(if (loggedIn) R.string.login_active else R.string.weibo_login_unverified)
                 loginButton.text = getString(if (loggedIn) R.string.login_again else R.string.login_weibo)
+                WeiboSession.refresh(this) { verified ->
+                    if (!isFinishing && !isDestroyed) {
+                        loginStatus.text = getString(when (verified) {
+                            true -> R.string.login_active
+                            false -> R.string.login_inactive
+                            null -> R.string.weibo_login_unverified
+                        })
+                        loginButton.text = getString(if (verified == true) R.string.login_again else R.string.login_weibo)
+                    }
+                }
             }
             Platform.DOUYIN -> {
                 val loggedIn = DouyinSession.isSignedIn()

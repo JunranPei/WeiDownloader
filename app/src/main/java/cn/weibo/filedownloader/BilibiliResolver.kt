@@ -88,6 +88,23 @@ internal class BilibiliHttpClient(
             "${encode(it.key)}=${encode(it.value)}"
         }))
 
+    fun getPlayJson(parameters: Map<String, String>): JSONObject {
+        val key = runCatching {
+            BilibiliWbiSigner.mixinKey(getJson("https://api.bilibili.com/x/web-interface/nav", emptyMap()))
+        }.getOrNull()
+        if (key != null) {
+            val signed = runCatching {
+                getJson(
+                    "https://api.bilibili.com/x/player/wbi/playurl",
+                    BilibiliWbiSigner.sign(parameters, key, System.currentTimeMillis() / 1000L),
+                )
+            }.getOrNull()
+            if (signed != null && signed.optInt("code", -1) == 0) return signed
+        }
+        // Some sessions can still use the legacy desktop endpoint; keep DASH enabled here too.
+        return getJson("https://api.bilibili.com/x/player/playurl", parameters)
+    }
+
     fun requestText(address: String, referer: String = BILIBILI_REFERER): String {
         val connection = (URL(address).openConnection() as HttpURLConnection).apply {
             instanceFollowRedirects = true

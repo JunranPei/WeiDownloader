@@ -30,12 +30,17 @@ class SafDownloadWorker(
         val fileName = inputData.getString(KEY_FILE_NAME) ?: return terminalFailure(statusWorkId)
         val mediaType = inputData.getString(KEY_MEDIA_TYPE).orEmpty()
         val cookie = inputData.getString(KEY_COOKIE).orEmpty()
+        val audioUrl = inputData.getString(KEY_AUDIO_URL).orEmpty()
         val referer = inputData.getString(KEY_REFERER).orEmpty()
 
         var destination: DownloadDestination? = null
         return try {
             destination = createDestination(treeUri, folderName, fileName, mediaType)
-            download(sourceUrl, cookie, referer, destination, statusWorkId)
+            if (audioUrl.isNotBlank()) {
+                downloadDash(sourceUrl, audioUrl, cookie, referer, destination, statusWorkId)
+            } else {
+                download(sourceUrl, cookie, referer, destination, statusWorkId)
+            }
             destination.commit()
             DownloadStatusStore(applicationContext).completeWorker(statusWorkId)
             Result.success()
@@ -144,12 +149,21 @@ class SafDownloadWorker(
         referer: String,
         destination: DownloadDestination,
         statusWorkId: String,
-    ) {
-        val connection = (URL(sourceUrl).openConnection() as HttpURLConnection).apply {
+        progressOffset: Long = 0L,
+        moreTracks: Boolean = false,
+    ): Long {
+        val weiboRequest = inputData.getString(KEY_PLATFORM) == Platform.WEIBO.key ||
+            inputData.getString(KEY_PLATFORM) == null && referer == REFERER
+        val connection = if (weiboRequest) WeiboSession.openConnection(sourceUrl,
+            headers = mapOf("Referer" to referer.ifBlank { REFERER }, "Accept-Encoding" to "identity"),
+            connectTimeout = CONNECT_TIMEOUT_MS, readTimeout = READ_TIMEOUT_MS)
+        else (URL(sourceUrl).openConnection() as HttpURLConnection).apply {
             instanceFollowRedirects = true
             connectTimeout = CONNECT_TIMEOUT_MS
             readTimeout = READ_TIMEOUT_MS
-            setRequestProperty("User-Agent", USER_AGENT)
+            // Bilibili DASH URLs must use the same desktop identity as the playurl request.
+            setRequestProperty("User-Agent", if (referer == BilibiliHttpClient.BILIBILI_REFERER)
+                BilibiliHttpClient.USER_AGENT else USER_AGENT)
             setRequestProperty("Referer", referer.ifBlank { REFERER })
             setRequestProperty("Accept-Encoding", "identity")
             if (cookie.isNotBlank()) setRequestProperty("Cookie", cookie)
@@ -157,13 +171,14 @@ class SafDownloadWorker(
         try {
             val status = connection.responseCode
             if (status !in 200..299) throw IOException("HTTP $status")
-            val totalBytes = connection.contentLengthLong.takeIf { it > 0L } ?: -1L
+            val totalBytes = if (moreTracks || connection.contentLengthLong <= 0L) -1L
+                else progressOffset + connection.contentLengthLong
             val statusStore = DownloadStatusStore(applicationContext)
-            statusStore.updateWorkerTaskProgress(statusWorkId, 0L, totalBytes)
+            statusStore.updateWorkerTaskProgress(statusWorkId, progressOffset, totalBytes)
             connection.inputStream.use { input ->
                 destination.openOutput().use { output ->
                     val buffer = ByteArray(BUFFER_SIZE)
-                    var downloadedBytes = 0L
+                    var downloadedBytes = progressOffset
                     var lastReportedAt = 0L
                     while (true) {
                         if (isStopped) throw IOException("Download stopped")
@@ -178,10 +193,49 @@ class SafDownloadWorker(
                         }
                     }
                     statusStore.updateWorkerTaskProgress(statusWorkId, downloadedBytes, totalBytes)
+                    return downloadedBytes
                 }
             }
         } finally {
             connection.disconnect()
+        }
+    }
+
+    private fun downloadDash(
+        videoUrl: String,
+        audioUrl: String,
+        cookie: String,
+        referer: String,
+        destination: DownloadDestination,
+        statusWorkId: String,
+    ) {
+        val temporary = mutableListOf<File>()
+        fun temporaryFile(suffix: String): File =
+            File.createTempFile("dash-", suffix, applicationContext.cacheDir).also(temporary::add)
+        try {
+            val video = temporaryFile("-video.m4s")
+            val audio = temporaryFile("-audio.m4s")
+            val merged = temporaryFile(".mp4")
+            val videoBytes = download(videoUrl, cookie, referer,
+                DownloadDestination(openOutput = { FileOutputStream(video) }), statusWorkId,
+                moreTracks = true)
+            download(audioUrl, cookie, referer,
+                DownloadDestination(openOutput = { FileOutputStream(audio) }), statusWorkId,
+                progressOffset = videoBytes)
+            DashMediaMuxer.mux(video, audio, merged) { isStopped }
+            merged.inputStream().use { input ->
+                destination.openOutput().use { output ->
+                    val buffer = ByteArray(BUFFER_SIZE)
+                    while (true) {
+                        if (isStopped) throw IOException("Download stopped")
+                        val count = input.read(buffer)
+                        if (count < 0) break
+                        output.write(buffer, 0, count)
+                    }
+                }
+            }
+        } finally {
+            temporary.forEach { it.delete() }
         }
     }
 
@@ -206,7 +260,9 @@ class SafDownloadWorker(
 
     companion object {
         const val KEY_URL = "url"
+        const val KEY_AUDIO_URL = "audio_url"
         const val KEY_COOKIE = "cookie"
+        const val KEY_PLATFORM = "platform"
         const val KEY_TREE_URI = "tree_uri"
         const val KEY_FOLDER = "folder"
         const val KEY_FILE_NAME = "file_name"
