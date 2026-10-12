@@ -36,7 +36,7 @@ class LoginActivity : Activity() {
         configureTransparentSystemBars()
         setContentView(R.layout.activity_login)
         doneButton = findViewById(R.id.loginDoneButton)
-        if (platform == Platform.XIAOHONGSHU || platform == Platform.WEIBO) doneButton.isEnabled = false
+        if (platform in setOf(Platform.XIAOHONGSHU, Platform.WEIBO, Platform.REDDIT)) doneButton.isEnabled = false
         webView = findViewById<WebView>(R.id.loginWebView).apply {
             settings.javaScriptEnabled = true
             settings.domStorageEnabled = true
@@ -99,7 +99,8 @@ class LoginActivity : Activity() {
                 Platform.X -> X_LOGIN_URL
                 Platform.INSTAGRAM -> INSTAGRAM_LOGIN_URL
                 Platform.XIAOHONGSHU -> XIAOHONGSHU_LOGIN_URL
-                Platform.REDDIT -> "https://www.reddit.com/"
+                Platform.REDDIT -> intent.getStringExtra(EXTRA_REDDIT_URL)
+                    ?.takeIf { RedditLinkParser.isRedditUrl(it) } ?: "https://www.reddit.com/login/"
             }
             if (platform == Platform.WEIBO) {
                 val loginView = this
@@ -120,6 +121,10 @@ class LoginActivity : Activity() {
         doneButton.setOnClickListener {
             if (platform == Platform.WEIBO) WeiboSession.flushCookies() else CookieManager.getInstance().flush()
             if (platform == Platform.XIAOHONGSHU && !XiaohongshuSession.isSignedIn()) {
+                refreshLoginState()
+                return@setOnClickListener
+            }
+            if (platform == Platform.REDDIT && !RedditSession.isSignedIn()) {
                 refreshLoginState()
                 return@setOnClickListener
             }
@@ -161,7 +166,16 @@ class LoginActivity : Activity() {
             Platform.X -> false
             Platform.INSTAGRAM -> false
             Platform.XIAOHONGSHU -> XiaohongshuSession.isSignedIn()
-            Platform.REDDIT -> false
+            Platform.REDDIT -> RedditSession.isSignedIn()
+        }
+        if (platform == Platform.REDDIT) {
+            RedditSession.verifyFromPage(webView) { verified ->
+                if (!isFinishing && !isDestroyed) {
+                    doneButton.isEnabled = verified
+                    doneButton.setText(if (verified) R.string.login_done_ready else R.string.login_done_waiting)
+                }
+            }
+            return
         }
         if (platform == Platform.WEIBO) {
             doneButton.isEnabled = signedIn
@@ -222,6 +236,7 @@ class LoginActivity : Activity() {
 
     companion object {
         const val EXTRA_PLATFORM = "platform"
+        const val EXTRA_REDDIT_URL = "reddit_url"
         private const val WEIBO_LOGIN_URL = "https://passport.weibo.com/"
         private const val DOUYIN_LOGIN_URL =
             "https://sso.douyin.com/?service=www.douyin.com%2Flogin%3Ftype%3Dstormplatform_home"

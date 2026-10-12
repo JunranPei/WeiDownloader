@@ -135,6 +135,7 @@ class MainActivity : ComponentActivity() {
             return
         }
         image.load(thumbnailUrl) {
+            if (platform == Platform.REDDIT) addHeader("Accept", "image/*")
             crossfade(false)
             memoryCachePolicy(coil.request.CachePolicy.ENABLED)
             diskCachePolicy(coil.request.CachePolicy.ENABLED)
@@ -569,6 +570,10 @@ class MainActivity : ComponentActivity() {
         val url = linkInput.text?.toString()?.trim().orEmpty()
         if (url.isBlank()) return toast(getString(R.string.link_required))
         adoptPlatformForUrl(url)
+        if (platform == Platform.REDDIT && linkInput.text?.toString() != url) {
+            linkInput.setText(url)
+            linkInput.setSelection(url.length)
+        }
         refreshSession()
         post = null
         selectedUrls.clear()
@@ -789,7 +794,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun bindCreatorPresentation(creator: CreatorProfile?) {
-        if (platform !in setOf(Platform.DOUYIN, Platform.BILIBILI, Platform.TELEGRAM, Platform.X, Platform.XIAOHONGSHU) || creator == null || creator.id.isBlank()) {
+        if (platform !in setOf(Platform.DOUYIN, Platform.BILIBILI, Platform.TELEGRAM, Platform.X, Platform.XIAOHONGSHU, Platform.REDDIT) || creator == null || creator.id.isBlank()) {
             creatorCard.visibility = View.GONE
             creatorCard.setOnClickListener(null)
             return
@@ -969,7 +974,7 @@ class MainActivity : ComponentActivity() {
             Platform.X -> ""
             Platform.INSTAGRAM -> ""
             Platform.XIAOHONGSHU -> XiaohongshuSession.cookieHeader()
-            Platform.REDDIT -> ""
+            Platform.REDDIT -> RedditSession.cookieHeader()
         }
     }
 

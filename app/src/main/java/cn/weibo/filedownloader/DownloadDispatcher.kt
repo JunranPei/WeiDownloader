@@ -56,7 +56,7 @@ class DownloadDispatcher(
                 val input = Data.Builder()
                     .putString(SafDownloadWorker.KEY_URL, download.url)
                     .putString(SafDownloadWorker.KEY_AUDIO_URL, download.audioUrl)
-                    .putString(SafDownloadWorker.KEY_COOKIE, if (platform == Platform.WEIBO) "" else cookie)
+                    .putString(SafDownloadWorker.KEY_COOKIE, if (platform in setOf(Platform.WEIBO, Platform.REDDIT)) "" else cookie)
                     .putString(SafDownloadWorker.KEY_PLATFORM, platform.key)
                     .putString(SafDownloadWorker.KEY_TREE_URI, destinationTreeUri)
                     .putString(SafDownloadWorker.KEY_FOLDER, folderName)

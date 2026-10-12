@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "cases": [
+    {
+      "id": "truesize-detailed-language-map-1x1nhm3",
+      "purpose": "Verify that both Android share entry links resolve to the full Reddit-hosted image rather than a resized preview.",
+      "share_urls": [
+        "https://www.reddit.com/r/TrueSize/s/X4CK9gNsx8",
+        "https://www.reddit.com/r/TrueSize/s/kcOv6fwTds"
+      ],
+      "post_url": "https://www.reddit.com/r/TrueSize/comments/1x1nhm3/can_you_guys_add_languages_please/",
+      "post_id": "1x1nhm3",
+      "author": "Master-Article-6131",
+      "original_url": "https://i.redd.it/i0vjbqdsgguh1.jpeg",
+      "expected_file": "image_1x1nhm3_01.jpeg",
+      "baseline": {
+        "verified_on": "2026-10-12",
+        "format": "JPEG",
+        "width": 10453,
+        "height": 4900,
+        "bytes": 4374367,
+        "sha256": "ec2685be46862add91c4cf3bd18c97fc8e75adaad83314cc59f0e1abe018b0b1"
+      },
+      "acceptance_steps": [
+        "Resolve each share URL separately through the Android app UI; both must identify the same post and display 10453 x 4900.",
+        "Download the selected image into Android shared storage, then decode the saved file and compare its dimensions, length, and SHA-256 to the original resource.",
+        "After the first download, the other share URL must recognize the same file as already downloaded.",
+        "If the remote resource changes or expires, record the change and reverify the baseline instead of silently replacing the expected hash."
+      ],
+      "scope": "The baseline is the current Reddit-hosted original, not the author's pre-upload source. This case does not measure the official Reddit Android app's saved output."
+    }
+  ]
+}

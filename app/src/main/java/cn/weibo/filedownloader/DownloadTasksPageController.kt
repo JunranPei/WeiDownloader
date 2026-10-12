@@ -91,6 +91,7 @@ private class DownloadWorksAdapter(
             context.getString(R.string.download_work_fallback_title, item.author)
         }
         holder.thumbnail.load(item.thumbnailUrl.takeIf(String::isNotBlank)) {
+            if (item.platform == Platform.REDDIT) addHeader("Accept", "image/*")
             crossfade(false)
             placeholder(R.drawable.ic_media_placeholder)
             error(R.drawable.ic_media_placeholder)

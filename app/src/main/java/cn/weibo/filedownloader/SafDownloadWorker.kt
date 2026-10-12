@@ -154,6 +154,7 @@ class SafDownloadWorker(
     ): Long {
         val weiboRequest = inputData.getString(KEY_PLATFORM) == Platform.WEIBO.key ||
             inputData.getString(KEY_PLATFORM) == null && referer == REFERER
+        val redditRequest = inputData.getString(KEY_PLATFORM) == Platform.REDDIT.key
         val connection = if (weiboRequest) WeiboSession.openConnection(sourceUrl,
             headers = mapOf("Referer" to referer.ifBlank { REFERER }, "Accept-Encoding" to "identity"),
             connectTimeout = CONNECT_TIMEOUT_MS, readTimeout = READ_TIMEOUT_MS)
@@ -166,11 +167,15 @@ class SafDownloadWorker(
                 BilibiliHttpClient.USER_AGENT else USER_AGENT)
             setRequestProperty("Referer", referer.ifBlank { REFERER })
             setRequestProperty("Accept-Encoding", "identity")
-            if (cookie.isNotBlank()) setRequestProperty("Cookie", cookie)
+            if (redditRequest) setRequestProperty("Accept", "image/*,video/*,audio/*,application/octet-stream;q=0.9")
+            if (cookie.isNotBlank() && !redditRequest) setRequestProperty("Cookie", cookie)
         }
         try {
             val status = connection.responseCode
             if (status !in 200..299) throw IOException("HTTP $status")
+            if (redditRequest && connection.contentType.orEmpty().let {
+                    it.startsWith("text/", true) || it.contains("json", true)
+                }) throw IOException("Reddit returned a page instead of media")
             val totalBytes = if (moreTracks || connection.contentLengthLong <= 0L) -1L
                 else progressOffset + connection.contentLengthLong
             val statusStore = DownloadStatusStore(applicationContext)

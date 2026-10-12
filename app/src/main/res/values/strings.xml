@@ -236,4 +236,17 @@
     <string name="reddit_default_author">Reddit 用户</string>
     <string name="reddit_http_error">Reddit 返回 HTTP %1$d。</string>
     <string name="reddit_network_error">读取 Reddit 失败：%1$s</string>
+    <string name="login_reddit">登录 Reddit</string>
+    <string name="reddit_settings_title">Reddit 设置</string>
+    <string name="reddit_account">Reddit 账号</string>
+    <string name="open_in_reddit">在 Reddit 中查看</string>
+    <string name="reddit_preferences">内容与模糊图片设置</string>
+    <string name="reddit_login_active">Reddit 登录已验证。内容可见性由 Reddit 账号设置决定。</string>
+    <string name="reddit_login_saved">已保存 Reddit 会话，登录有效性尚未验证。</string>
+    <string name="reddit_login_inactive">公开帖子可直接解析。受限内容需登录，并在 Reddit 中完成所需验证；模糊图片可在内容设置中调整。</string>
+    <string name="reddit_invalid_response">Reddit 未返回有效帖子数据。请在设置中登录后重试。</string>
+    <string name="reddit_access_denied">Reddit 拒绝访问（HTTP %1$d）。请在设置中登录，检查账号内容设置及所需年龄验证；也可能是网络访问限制。</string>
+    <string name="reddit_rate_limited">Reddit 请求过于频繁，请稍后重试。</string>
+    <string name="reddit_restricted_media">Reddit 未提供可下载的原始媒体。请登录并检查内容设置或年龄验证；不会将模糊预览保存为原图。</string>
+    <string name="reddit_video_audio_unavailable">无法取得 Reddit 视频的完整媒体轨道，请稍后重试。</string>
 </resources>

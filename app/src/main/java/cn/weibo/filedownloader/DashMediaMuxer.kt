@@ -31,8 +31,14 @@ internal object DashMediaMuxer {
             val info = MediaCodec.BufferInfo()
             while (true) {
                 if (isStopped()) throw IOException("Download stopped")
-                val (extractor, track) = tracks.filter { it.first.sampleTime >= 0 }
+                val (extractor, track) = tracks.filter { it.first.sampleTrackIndex >= 0 }
                     .minByOrNull { it.first.sampleTime } ?: break
+                // AAC priming samples can have negative timestamps. A negative time
+                // is not end-of-stream; advance past priming instead of losing the track.
+                if (extractor.sampleTime < 0) {
+                    extractor.advance()
+                    continue
+                }
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P && extractor.sampleSize > buffer.capacity()) {
                     val size = extractor.sampleSize
                     if (size > Int.MAX_VALUE) throw IOException("Media sample too large")

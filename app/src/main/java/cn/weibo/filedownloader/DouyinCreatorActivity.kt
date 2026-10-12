@@ -61,6 +61,7 @@ class DouyinCreatorActivity : Activity() {
     private var bilibiliOffset = ""
     private var telegramBefore = ""
     private var xCursor = ""
+    private var redditAfter = ""
     private var xiaohongshuLoaded = false
     private var hasMore = true
     private var loading = false
@@ -148,6 +149,7 @@ class DouyinCreatorActivity : Activity() {
                 bilibiliOffset = ""
                 telegramBefore = ""
                 xCursor = ""
+                redditAfter = ""
                 xiaohongshuLoaded = false
                 hasMore = true
                 if (creator.platform == Platform.BILIBILI && usingBilibiliWebFallback) {
@@ -176,6 +178,7 @@ class DouyinCreatorActivity : Activity() {
                     Platform.TELEGRAM -> R.string.open_in_telegram
                     Platform.X -> R.string.open_in_x
                     Platform.XIAOHONGSHU -> R.string.open_in_xiaohongshu
+                    Platform.REDDIT -> R.string.open_in_reddit
                     else -> R.string.open_in_douyin
                 },
             )
@@ -197,6 +200,10 @@ class DouyinCreatorActivity : Activity() {
 
     private fun loadMore() {
         if (loading || !hasMore) return
+        if (creator.platform == Platform.REDDIT) {
+            loadMoreFromReddit()
+            return
+        }
         if (creator.platform == Platform.X) {
             loadMoreFromX()
             return
@@ -292,6 +299,36 @@ class DouyinCreatorActivity : Activity() {
                 Log.w(LOG_TAG, "Xiaohongshu creator failed", error)
             },
         )
+    }
+
+    private fun loadMoreFromReddit() {
+        loading = true
+        if (adapter.itemCount == 0) showLoading()
+        val requestedAfter = redditAfter
+        executor.execute {
+            val result = runCatching { RedditCreatorRepository(this).loadPage(creator, requestedAfter) }
+            runOnUiThread {
+                if (isFinishing || isDestroyed) return@runOnUiThread
+                loading = false
+                result.fold(onSuccess = { page ->
+                    adapter.append(page.works)
+                    redditAfter = page.nextAfter
+                    hasMore = page.nextAfter.isNotBlank() && page.nextAfter != requestedAfter
+                    Log.i(LOG_TAG, "Reddit loaded=${page.works.size} displayed=${adapter.itemCount} continued=${requestedAfter.isNotBlank()} hasMore=$hasMore")
+                    if (adapter.itemCount > 0) state.visibility = View.GONE
+                    else if (!hasMore) showMessage(R.string.creator_empty, false)
+                    // Text-only pages still advance the cursor until media or the end is found.
+                    if (adapter.itemCount == 0 && hasMore) loadMore()
+                }, onFailure = { error ->
+                    hasMore = true
+                    if (adapter.itemCount == 0) {
+                        showMessage(R.string.reddit_read_failed, true)
+                        stateText.text = error.message ?: getString(R.string.reddit_read_failed)
+                    } else Toast.makeText(this, error.message, Toast.LENGTH_LONG).show()
+                    Log.w(LOG_TAG, "Could not load Reddit creator posts", error)
+                })
+            }
+        }
     }
 
     private fun loadMoreFromX() {
@@ -511,6 +548,13 @@ class DouyinCreatorActivity : Activity() {
             quickDownloadProcessed + 1,
             quickDownloadTotal,
         )
+        if (creator.platform == Platform.REDDIT) {
+            executor.execute {
+                val result = runCatching { RedditClient(this).loadPost(work.sourceUrl) }
+                runOnUiThread { handleResolvedQuickDownload(work, result) }
+            }
+            return
+        }
         if (creator.platform == Platform.BILIBILI) {
             executor.execute {
                 val result = runCatching {
@@ -721,6 +765,7 @@ private class CreatorWorksAdapter(
     override fun onBindViewHolder(holder: Holder, position: Int) {
         val item = items[position]
         holder.cover.load(item.coverUrl.takeIf(String::isNotBlank)) {
+            if (RedditLinkParser.isSupported(item.sourceUrl)) addHeader("Accept", "image/*")
             crossfade(true)
             memoryCachePolicy(coil.request.CachePolicy.ENABLED)
             diskCachePolicy(coil.request.CachePolicy.ENABLED)
@@ -728,7 +773,9 @@ private class CreatorWorksAdapter(
             error(R.drawable.ic_media_placeholder)
         }
         holder.title.text = item.title.ifBlank { holder.itemView.context.getString(R.string.creator_untitled_work) }
-        holder.type.text = if (item.isGallery) {
+        holder.type.text = if (item.isGallery && item.mediaCount == 1 && RedditLinkParser.isSupported(item.sourceUrl)) {
+            holder.itemView.context.getString(R.string.media_image)
+        } else if (item.isGallery) {
             if (item.mediaCount > 1) {
                 holder.itemView.context.getString(R.string.creator_gallery_count, item.mediaCount)
             } else {

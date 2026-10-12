@@ -12,7 +12,7 @@ class RedditParserTest {
 
         assertTrue(RedditLinkParser.isSupported(share))
         assertEquals(
-            "https://www.reddit.com/r/pics/comments/1s6d7rv/plaza_de_espana.json?raw_json=1",
+            "https://www.reddit.com/comments/1s6d7rv.json?raw_json=1",
             RedditLinkParser.jsonEndpoint(share),
         )
     }

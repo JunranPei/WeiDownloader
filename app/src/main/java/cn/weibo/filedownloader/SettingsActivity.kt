@@ -116,7 +116,7 @@ class SettingsActivity : ComponentActivity() {
                 Platform.X -> R.string.x_settings_title
                 Platform.INSTAGRAM -> R.string.instagram_settings_title
                 Platform.XIAOHONGSHU -> R.string.xiaohongshu_default_title
-                Platform.REDDIT -> R.string.reddit_default_title
+                Platform.REDDIT -> R.string.reddit_settings_title
             },
         )
         val accountSectionTitle = findViewById<TextView>(R.id.settingsPlatformSectionTitle)
@@ -129,12 +129,20 @@ class SettingsActivity : ComponentActivity() {
                 Platform.X -> R.string.x_public_posts
                 Platform.INSTAGRAM -> R.string.instagram_public_posts
                 Platform.XIAOHONGSHU -> R.string.xiaohongshu_default_title
-                Platform.REDDIT -> R.string.reddit_default_title
+                Platform.REDDIT -> R.string.reddit_account
             },
         )
-        val accountVisibility = if (platform in setOf(Platform.TELEGRAM, Platform.X, Platform.INSTAGRAM, Platform.REDDIT)) View.GONE else View.VISIBLE
+        val accountVisibility = if (platform in setOf(Platform.TELEGRAM, Platform.X, Platform.INSTAGRAM)) View.GONE else View.VISIBLE
         accountSectionTitle.visibility = accountVisibility
         findViewById<View>(R.id.settingsPlatformAccountCard).visibility = accountVisibility
+        findViewById<View>(R.id.settingsRedditPreferences).apply {
+            visibility = if (platform == Platform.REDDIT) View.VISIBLE else View.GONE
+            setOnClickListener {
+                startActivityForResult(Intent(this@SettingsActivity, LoginActivity::class.java)
+                    .putExtra(LoginActivity.EXTRA_PLATFORM, Platform.REDDIT.key)
+                    .putExtra(LoginActivity.EXTRA_REDDIT_URL, "https://www.reddit.com/settings/preferences"), loginRequest)
+            }
+        }
     }
     private fun configureLiveCover() {
         liveCoverSwitch.isChecked = preferences.getBoolean("live_cover", false)
@@ -308,7 +316,14 @@ class SettingsActivity : ComponentActivity() {
             Platform.TELEGRAM -> Unit
             Platform.X -> Unit
             Platform.INSTAGRAM -> Unit
-            Platform.REDDIT -> Unit
+            Platform.REDDIT -> {
+                loginStatus.setText(when {
+                    RedditSession.isSignedIn() -> R.string.reddit_login_active
+                    RedditSession.hasSavedSession() -> R.string.reddit_login_saved
+                    else -> R.string.reddit_login_inactive
+                })
+                loginButton.setText(R.string.login_reddit)
+            }
         }
     }
 
