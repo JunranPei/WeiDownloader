@@ -12,8 +12,8 @@ android {
         applicationId = "cn.weibo.filedownloader"
         minSdk = 24
         targetSdk = 35
-        versionCode = 10035
-        versionName = "0.0.45"
+        versionCode = 10036
+        versionName = "0.0.46"
     }
 
     compileOptions {
