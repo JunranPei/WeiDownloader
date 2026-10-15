@@ -36,7 +36,7 @@ class LoginActivity : Activity() {
         configureTransparentSystemBars()
         setContentView(R.layout.activity_login)
         doneButton = findViewById(R.id.loginDoneButton)
-        if (platform in setOf(Platform.XIAOHONGSHU, Platform.WEIBO, Platform.REDDIT)) doneButton.isEnabled = false
+        if (platform in setOf(Platform.XIAOHONGSHU, Platform.WEIBO, Platform.REDDIT, Platform.INSTAGRAM)) doneButton.isEnabled = false
         webView = findViewById<WebView>(R.id.loginWebView).apply {
             settings.javaScriptEnabled = true
             settings.domStorageEnabled = true
@@ -128,6 +128,10 @@ class LoginActivity : Activity() {
                 refreshLoginState()
                 return@setOnClickListener
             }
+            if (platform == Platform.INSTAGRAM && !InstagramSession.isSignedIn()) {
+                refreshLoginState()
+                return@setOnClickListener
+            }
             setResult(RESULT_OK)
             finish()
         }
@@ -164,12 +168,21 @@ class LoginActivity : Activity() {
             Platform.BILIBILI -> BilibiliSession.isSignedIn()
             Platform.TELEGRAM -> false
             Platform.X -> false
-            Platform.INSTAGRAM -> false
+            Platform.INSTAGRAM -> InstagramSession.isSignedIn()
             Platform.XIAOHONGSHU -> XiaohongshuSession.isSignedIn()
             Platform.REDDIT -> RedditSession.isSignedIn()
         }
         if (platform == Platform.REDDIT) {
             RedditSession.verifyFromPage(webView) { verified ->
+                if (!isFinishing && !isDestroyed) {
+                    doneButton.isEnabled = verified
+                    doneButton.setText(if (verified) R.string.login_done_ready else R.string.login_done_waiting)
+                }
+            }
+            return
+        }
+        if (platform == Platform.INSTAGRAM) {
+            InstagramSession.verifyFromPage(webView) { verified ->
                 if (!isFinishing && !isDestroyed) {
                     doneButton.isEnabled = verified
                     doneButton.setText(if (verified) R.string.login_done_ready else R.string.login_done_waiting)

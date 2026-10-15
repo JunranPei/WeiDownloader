@@ -71,6 +71,16 @@
     <string name="telegram_public_posts">Telegram 公开频道</string>
     <string name="x_public_posts">X 公开帖子</string>
     <string name="instagram_public_posts">Instagram 公开帖子</string>
+    <string name="instagram_account">Instagram 账号</string>
+    <string name="login_instagram">登录 Instagram</string>
+    <string name="instagram_login_active">已验证登录；下载时会尝试获取更高分辨率图片。</string>
+    <string name="instagram_login_saved">已保存登录会话；可打开登录页重新验证。</string>
+    <string name="instagram_login_inactive">公开帖子仍可尝试下载；登录后可获取更多高清图片来源。</string>
+    <string name="instagram_login_required">Instagram 限制了匿名读取，请在 Instagram 设置中登录后重试。</string>
+    <string name="instagram_image_reduced">第 %1$d 张图片：当前 %2$d×%3$d，原始尺寸记录为 %4$d×%5$d。</string>
+    <string name="instagram_image_unverified">第 %1$d 张图片：已选择当前候选中的最大图片，原始尺寸尚未验证。</string>
+    <string name="instagram_quality_login_hint">可在 Instagram 设置中登录后重新解析，尝试获取更高清图片。</string>
+    <string name="instagram_quality_source_failed">高清来源暂时无法读取；当前显示已获取的图片。</string>
     <string name="douyin_settings">抖音下载</string>
     <string name="douyin_settings_no_login">抖音公开链接无需登录</string>
     <string name="checking_login">正在检查登录状态…</string>

@@ -653,7 +653,7 @@ class MainActivity : ComponentActivity() {
         } else {
             getString(R.string.identified_format, loaded.media.size, available, loaded.author)
         }
-        busy(false, summary)
+        busy(false, listOf(summary, loaded.notice).filter(String::isNotBlank).joinToString("\n"))
     }
 
     private fun openDownloadWork(work: ActiveDownloadWork) {

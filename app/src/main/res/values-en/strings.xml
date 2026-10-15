@@ -71,6 +71,16 @@
     <string name="telegram_public_posts">Public Telegram channels</string>
     <string name="x_public_posts">Public X posts</string>
     <string name="instagram_public_posts">Public Instagram posts</string>
+    <string name="instagram_account">Instagram account</string>
+    <string name="login_instagram">Log in to Instagram</string>
+    <string name="instagram_login_active">Login verified. Downloads will try higher resolution image sources.</string>
+    <string name="instagram_login_saved">A login session is saved. Open the login page to verify it again.</string>
+    <string name="instagram_login_inactive">Public posts can still be downloaded. Log in to access more high resolution image sources.</string>
+    <string name="instagram_login_required">Instagram restricted anonymous access. Log in through Instagram settings and try again.</string>
+    <string name="instagram_image_reduced">Image %1$d: available %2$d×%3$d; recorded original dimensions %4$d×%5$d.</string>
+    <string name="instagram_image_unverified">Image %1$d: selected the largest available candidate; original dimensions have not been verified.</string>
+    <string name="instagram_quality_login_hint">Log in through Instagram settings and parse the post again to try higher resolution sources.</string>
+    <string name="instagram_quality_source_failed">The high resolution source could not be read. Showing the images obtained so far.</string>
     <string name="douyin_settings">Douyin downloads</string>
     <string name="douyin_settings_no_login">Public Douyin links do not require sign-in</string>
     <string name="checking_login">Checking sign-in status…</string>

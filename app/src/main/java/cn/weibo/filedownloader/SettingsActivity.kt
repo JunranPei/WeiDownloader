@@ -127,12 +127,12 @@ class SettingsActivity : ComponentActivity() {
                 Platform.BILIBILI -> R.string.bilibili_account
                 Platform.TELEGRAM -> R.string.telegram_public_posts
                 Platform.X -> R.string.x_public_posts
-                Platform.INSTAGRAM -> R.string.instagram_public_posts
+                Platform.INSTAGRAM -> R.string.instagram_account
                 Platform.XIAOHONGSHU -> R.string.xiaohongshu_default_title
                 Platform.REDDIT -> R.string.reddit_account
             },
         )
-        val accountVisibility = if (platform in setOf(Platform.TELEGRAM, Platform.X, Platform.INSTAGRAM)) View.GONE else View.VISIBLE
+        val accountVisibility = if (platform in setOf(Platform.TELEGRAM, Platform.X)) View.GONE else View.VISIBLE
         accountSectionTitle.visibility = accountVisibility
         findViewById<View>(R.id.settingsPlatformAccountCard).visibility = accountVisibility
         findViewById<View>(R.id.settingsRedditPreferences).apply {
@@ -315,7 +315,14 @@ class SettingsActivity : ComponentActivity() {
             }
             Platform.TELEGRAM -> Unit
             Platform.X -> Unit
-            Platform.INSTAGRAM -> Unit
+            Platform.INSTAGRAM -> {
+                loginStatus.setText(when {
+                    InstagramSession.isSignedIn() -> R.string.instagram_login_active
+                    InstagramSession.hasSavedSession() -> R.string.instagram_login_saved
+                    else -> R.string.instagram_login_inactive
+                })
+                loginButton.setText(if (InstagramSession.hasSavedSession()) R.string.login_again else R.string.login_instagram)
+            }
             Platform.REDDIT -> {
                 loginStatus.setText(when {
                     RedditSession.isSignedIn() -> R.string.reddit_login_active

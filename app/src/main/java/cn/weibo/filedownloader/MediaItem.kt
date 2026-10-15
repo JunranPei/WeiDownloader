@@ -45,12 +45,19 @@ data class MediaItem(
     val audioUrl: String = "",
     /** Weibo component identity; keeps mixed-post enhancements on the right video. */
     val videoObjectId: String = "",
+    /** Source metadata dimensions, for detecting reduced Instagram image candidates. */
+    val originalWidth: Int = 0,
+    val originalHeight: Int = 0,
 ) {
     val stableId: String get() = "${type.name}:$postId:$ordinal"
 
     fun selectVariant(key: String): MediaItem {
         val variant = variants.firstOrNull { it.key == key } ?: return this
-        return copy(url = variant.url, selectedVariantKey = variant.key, audioUrl = variant.audioUrl)
+        val selectedQuality = if (type == MediaType.IMAGE && originalWidth > 0 && originalHeight > 0) {
+            if (variant.dimensionsVerified && variant.width >= originalWidth - 1 && variant.height >= originalHeight - 1)
+                MediaQuality.ORIGINAL_BEST else MediaQuality.PLATFORM_BEST
+        } else quality
+        return copy(url = variant.url, selectedVariantKey = variant.key, audioUrl = variant.audioUrl, quality = selectedQuality)
     }
 
     fun suggestedFileName(): String {
@@ -107,6 +114,7 @@ data class MediaVariant(
     val height: Int = 0,
     val bitrate: Long = 0L,
     val audioUrl: String = "",
+    val dimensionsVerified: Boolean = false,
 ) {
     val pixelArea: Long get() = width.toLong() * height.toLong()
 }
@@ -174,6 +182,7 @@ data class WeiboPost(
     val sourceUrl: String,
     val media: List<MediaItem>,
     val creator: CreatorProfile? = null,
+    val notice: String = "",
 )
 
 data class CreatorProfile(
