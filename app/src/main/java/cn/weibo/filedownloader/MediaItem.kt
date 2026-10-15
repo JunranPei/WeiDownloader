@@ -48,6 +48,8 @@ data class MediaItem(
     /** Source metadata dimensions, for detecting reduced Instagram image candidates. */
     val originalWidth: Int = 0,
     val originalHeight: Int = 0,
+    /** Same-media alternate URLs to try if the selected URL is unavailable. */
+    val fallbackUrls: List<String> = emptyList(),
 ) {
     val stableId: String get() = "${type.name}:$postId:$ordinal"
 

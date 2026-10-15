@@ -55,6 +55,10 @@ class DownloadDispatcher(
                 val workId = UUID.randomUUID()
                 val input = Data.Builder()
                     .putString(SafDownloadWorker.KEY_URL, download.url)
+                    .putStringArray(
+                        SafDownloadWorker.KEY_FALLBACK_URLS,
+                        download.fallbackUrls.filter { it.isNotBlank() && it != download.url }.toTypedArray(),
+                    )
                     .putString(SafDownloadWorker.KEY_AUDIO_URL, download.audioUrl)
                     .putString(SafDownloadWorker.KEY_COOKIE, if (platform in setOf(Platform.WEIBO, Platform.REDDIT)) "" else cookie)
                     .putString(SafDownloadWorker.KEY_PLATFORM, platform.key)

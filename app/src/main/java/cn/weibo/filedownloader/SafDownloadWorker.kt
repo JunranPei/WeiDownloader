@@ -7,6 +7,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
+import android.util.Log
 import android.webkit.MimeTypeMap
 import androidx.documentfile.provider.DocumentFile
 import androidx.work.Worker
@@ -17,6 +18,7 @@ import java.io.IOException
 import java.io.OutputStream
 import java.net.HttpURLConnection
 import java.net.URL
+import java.util.UUID
 
 class SafDownloadWorker(
     appContext: Context,
@@ -32,28 +34,42 @@ class SafDownloadWorker(
         val cookie = inputData.getString(KEY_COOKIE).orEmpty()
         val audioUrl = inputData.getString(KEY_AUDIO_URL).orEmpty()
         val referer = inputData.getString(KEY_REFERER).orEmpty()
+        val fallbackUrls = inputData.getStringArray(KEY_FALLBACK_URLS).orEmpty()
+            .filter { it.isNotBlank() && it != sourceUrl }
+        val candidates = (listOf(sourceUrl) + fallbackUrls).distinct()
+        val effectiveCookie = if (inputData.getString(KEY_PLATFORM) == Platform.XIAOHONGSHU.key) {
+            XiaohongshuSession.cookieHeader().ifBlank { cookie }
+        } else cookie
 
-        var destination: DownloadDestination? = null
-        return try {
-            destination = createDestination(treeUri, folderName, fileName, mediaType)
-            if (audioUrl.isNotBlank()) {
-                downloadDash(sourceUrl, audioUrl, cookie, referer, destination, statusWorkId)
-            } else {
-                download(sourceUrl, cookie, referer, destination, statusWorkId)
+        var lastError: IOException? = null
+        candidates.forEachIndexed { index, candidate ->
+            var destination: DownloadDestination? = null
+            try {
+                destination = createDestination(treeUri, folderName, fileName, mediaType)
+                if (audioUrl.isNotBlank()) {
+                    downloadDash(candidate, audioUrl, effectiveCookie, referer, destination, statusWorkId)
+                } else {
+                    download(candidate, effectiveCookie, referer, destination, statusWorkId)
+                }
+                destination.commit()
+                DownloadStatusStore(applicationContext).completeWorker(statusWorkId)
+                return Result.success()
+            } catch (error: IOException) {
+                destination?.discard()
+                lastError = error
+                Log.w(TAG, "source failed attempt=${index + 1}/${candidates.size} host=${hostOf(candidate)} reason=${error.message}")
+            } catch (error: SecurityException) {
+                destination?.discard()
+                Log.e(TAG, "destination denied file=$fileName", error)
+                return terminalFailure(statusWorkId)
+            } catch (error: Exception) {
+                destination?.discard()
+                Log.e(TAG, "download failed file=$fileName", error)
+                return terminalFailure(statusWorkId)
             }
-            destination.commit()
-            DownloadStatusStore(applicationContext).completeWorker(statusWorkId)
-            Result.success()
-        } catch (error: IOException) {
-            destination?.discard()
-            if (runAttemptCount < MAX_RETRIES) Result.retry() else terminalFailure(statusWorkId)
-        } catch (_: SecurityException) {
-            destination?.discard()
-            terminalFailure(statusWorkId)
-        } catch (_: Exception) {
-            destination?.discard()
-            terminalFailure(statusWorkId)
         }
+        lastError?.let { Log.e(TAG, "all download sources failed file=$fileName", it) }
+        return if (runAttemptCount < MAX_RETRIES) Result.retry() else terminalFailure(statusWorkId)
     }
 
     private fun createDestination(
@@ -85,13 +101,19 @@ class SafDownloadWorker(
                 ?: parent.createDirectory(segment)
                 ?: throw IOException("Cannot create download folder")
         }
-        val target = folder.findFile(fileName) ?: folder.createFile(mimeType, fileName)
-            ?: throw IOException("Cannot create download file")
+        val temporaryName = "$fileName.part-${UUID.randomUUID()}"
+        val target = folder.createFile(mimeType, temporaryName)
+            ?: throw IOException("Cannot create temporary download file")
         return DownloadDestination(
             openOutput = {
                 applicationContext.contentResolver.openOutputStream(target.uri, "w")
                     ?: throw IOException("Cannot open selected destination")
             },
+            commitAction = {
+                folder.findFile(fileName)?.delete()
+                if (!target.renameTo(fileName)) throw IOException("Cannot finalize selected destination")
+            },
+            discardAction = { target.delete() },
         )
     }
 
@@ -172,18 +194,29 @@ class SafDownloadWorker(
         }
         try {
             val status = connection.responseCode
-            if (status !in 200..299) throw IOException("HTTP $status")
-            if (redditRequest && connection.contentType.orEmpty().let {
-                    it.startsWith("text/", true) || it.contains("json", true)
-                }) throw IOException("Reddit returned a page instead of media")
+            if (status !in 200..299) throw DownloadSourceException("HTTP $status")
+            val contentType = connection.contentType.orEmpty()
+            if (DownloadResponseValidator.isErrorContentType(contentType)) {
+                throw DownloadSourceException("unexpected content type $contentType")
+            }
+            if (redditRequest && contentType.isNotBlank() && contentType.contains("html", true)) {
+                throw DownloadSourceException("Reddit returned a page instead of media")
+            }
+            if (connection.contentLengthLong == 0L) throw DownloadSourceException("empty response")
             val totalBytes = if (moreTracks || connection.contentLengthLong <= 0L) -1L
                 else progressOffset + connection.contentLengthLong
             val statusStore = DownloadStatusStore(applicationContext)
             statusStore.updateWorkerTaskProgress(statusWorkId, progressOffset, totalBytes)
             connection.inputStream.use { input ->
+                val buffer = ByteArray(BUFFER_SIZE)
+                val firstCount = input.read(buffer)
+                if (firstCount <= 0) throw DownloadSourceException("empty response body")
+                if (DownloadResponseValidator.isErrorBody(buffer, firstCount)) {
+                    throw DownloadSourceException("response body is a web page or JSON error")
+                }
                 destination.openOutput().use { output ->
-                    val buffer = ByteArray(BUFFER_SIZE)
-                    var downloadedBytes = progressOffset
+                    output.write(buffer, 0, firstCount)
+                    var downloadedBytes = progressOffset + firstCount
                     var lastReportedAt = 0L
                     while (true) {
                         if (isStopped) throw IOException("Download stopped")
@@ -254,6 +287,8 @@ class SafDownloadWorker(
             }
     }
 
+    private fun hostOf(value: String): String = runCatching { URL(value).host }.getOrDefault("unknown")
+
     private class DownloadDestination(
         val openOutput: () -> OutputStream,
         private val commitAction: () -> Unit = {},
@@ -264,7 +299,9 @@ class SafDownloadWorker(
     }
 
     companion object {
+        private const val TAG = "SafDownloadWorker"
         const val KEY_URL = "url"
+        const val KEY_FALLBACK_URLS = "fallback_urls"
         const val KEY_AUDIO_URL = "audio_url"
         const val KEY_COOKIE = "cookie"
         const val KEY_PLATFORM = "platform"
@@ -284,3 +321,5 @@ class SafDownloadWorker(
         private const val REFERER = "https://weibo.com/"
     }
 }
+
+private class DownloadSourceException(message: String) : IOException(message)

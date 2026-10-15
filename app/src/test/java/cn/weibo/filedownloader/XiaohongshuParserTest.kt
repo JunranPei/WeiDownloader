@@ -134,12 +134,31 @@ class XiaohongshuParserTest {
         assertEquals("東申未来", post.author)
         assertEquals(1, post.media.size)
         val media = post.media.single()
-        assertEquals("https://sns-img-qc.xhscdn.com/notes_pre_post/1040g3k03256c9q6lk4005ogjgc5ocmhlrj93a48", media.url)
+        assertEquals("https://ci.xiaohongshu.com/notes_pre_post/1040g3k03256c9q6lk4005ogjgc5ocmhlrj93a48", media.url)
         assertEquals("https://sns-webpic-qc.xhscdn.com/photo!h5_1080jpg", media.thumbnailUrl)
-        assertEquals(2, media.variants.size)
+        assertEquals(4, media.variants.size)
+        assertEquals(
+            listOf(
+                "https://sns-img-bd.xhscdn.com/notes_pre_post/1040g3k03256c9q6lk4005ogjgc5ocmhlrj93a48",
+                "https://sns-img-qc.xhscdn.com/notes_pre_post/1040g3k03256c9q6lk4005ogjgc5ocmhlrj93a48",
+                "https://sns-webpic-qc.xhscdn.com/photo!h5_1080jpg",
+            ),
+            media.fallbackUrls,
+        )
         assertEquals(2560, media.variants.first().width)
         assertEquals(3840, media.variants.first().height)
         assertEquals("image_6aaab10b000000002902ecba_01.jpg", media.suggestedFileName())
+    }
+
+    @Test
+    fun prefersTraceIdWhenTheImageFileIdIsWatermarked() {
+        val html = "<script>window.__INITIAL_STATE__={\"note\":{\"noteId\":\"trace-note\",\"imageList\":[{\"width\":1440,\"height\":1920,\"fileId\":\"watermarked-id\",\"traceId\":\"clean-id\",\"urlDefault\":\"https://sns-webpic-qc.xhscdn.com/202610/clean-id!nd_dft_wlteh_webp_3\"}]}}</script>"
+
+        val media = requireNotNull(XiaohongshuPageNormalizer.normalize(html)).media.single()
+
+        assertEquals("https://ci.xiaohongshu.com/clean-id", media.url)
+        assertTrue(media.variants.any { it.url == "https://sns-img-bd.xhscdn.com/clean-id" })
+        assertTrue(media.variants.any { it.key == "web" && it.url.contains("sns-webpic") })
     }
 
     @Test
@@ -162,6 +181,7 @@ class XiaohongshuParserTest {
 
         assertEquals(MediaType.VIDEO, media.type)
         assertEquals("https://sns-webpic-qc.xhscdn.com/web-cover.jpg", media.thumbnailUrl)
+        assertTrue(media.fallbackUrls.isEmpty())
     }
 
     @Test
@@ -170,5 +190,64 @@ class XiaohongshuParserTest {
         val media = requireNotNull(XiaohongshuPageNormalizer.normalize(html)).media.single()
         assertEquals(MediaType.VIDEO, media.type)
         assertEquals("https://sns-video-qc.xhscdn.com/path/master.m3u8", media.url)
+    }
+
+    @Test
+    fun preservesMultipleVideoAttachmentsInsteadOfCollapsingToTheFirst() {
+        val payload = """{"noteId":"multi-video","video":[
+            {"id":"one","media":{"stream":{"h264":[{"masterUrl":"https://sns-video-qc.xhscdn.com/one.mp4"}]}}},
+            {"id":"two","media":{"stream":{"h264":[{"masterUrl":"https://sns-video-qc.xhscdn.com/two.mp4"}]}}}
+        ]}"""
+
+        val media = requireNotNull(XiaohongshuPageNormalizer.normalizePayload(payload)).media
+
+        assertEquals(2, media.size)
+        assertEquals(listOf("https://sns-video-qc.xhscdn.com/one.mp4", "https://sns-video-qc.xhscdn.com/two.mp4"), media.map { it.url })
+        assertEquals(listOf(1, 2), media.map { it.ordinal })
+    }
+
+    @Test
+    fun ordersVideoSourcesDeterministicallyAndKeepsFallbacks() {
+        val payload = """{"noteId":"video-sources","video":{
+            "consumer":{"originVideoKey":"origin/key.mp4"},
+            "media":{"stream":{"h264":[{"masterUrl":"https://sns-video-qc.xhscdn.com/master.mp4","backupUrls":["https://sns-bak-qc.xhscdn.com/backup.mp4"]}]}}
+        }}"""
+
+        val media = requireNotNull(XiaohongshuPageNormalizer.normalizePayload(payload)).media.single()
+
+        assertEquals("https://sns-video-bd.xhscdn.com/origin/key.mp4", media.url)
+        assertEquals(
+            listOf(
+                "https://sns-video-qc.xhscdn.com/master.mp4",
+                "https://sns-bak-qc.xhscdn.com/backup.mp4",
+            ),
+            media.fallbackUrls,
+        )
+    }
+
+    @Test
+    fun carriesVideoDimensionsFromContainerToNestedUrls() {
+        val payload = """{"noteId":"video-dimensions","video":{
+            "width":1082,"height":720,
+            "media":{"stream":{"h264":[{"masterUrl":"https://sns-video-qc.xhscdn.com/video.mp4"}]}}
+        }}"""
+
+        val media = requireNotNull(XiaohongshuPageNormalizer.normalizePayload(payload)).media.single()
+
+        assertEquals(1082, media.variants.single().width)
+        assertEquals(720, media.variants.single().height)
+    }
+
+    @Test
+    fun retainsGalleryImagesWhenASeparateVideoIsAlsoPresent() {
+        val payload = """{"noteId":"mixed-note","imageList":[
+            {"fileId":"image-one","url":"https://sns-webpic-qc.xhscdn.com/one.jpg"},
+            {"fileId":"image-two","url":"https://sns-webpic-qc.xhscdn.com/two.jpg"}
+        ],"video":{"media":{"stream":{"h264":[{"masterUrl":"https://sns-video-qc.xhscdn.com/video.mp4"}]}}}}"""
+
+        val media = requireNotNull(XiaohongshuPageNormalizer.normalizePayload(payload)).media
+
+        assertEquals(3, media.size)
+        assertEquals(listOf(MediaType.VIDEO, MediaType.IMAGE, MediaType.IMAGE), media.map { it.type })
     }
 }

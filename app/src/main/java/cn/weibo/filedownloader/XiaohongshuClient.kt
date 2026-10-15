@@ -92,7 +92,12 @@ internal object XiaohongshuPageNormalizer {
             image.thumbnailUrl.ifBlank { image.url }
         }.orEmpty()
         val videos = parseVideos(note, id, videoThumbnailUrl)
-        val media = if (videos.isNotEmpty()) videos else images
+        // A video note normally exposes one poster image, but some notes expose
+        // a gallery together with a video. Keep every real attachment instead
+        // of dropping the gallery just because a video field is present.
+        val media = if (videos.isNotEmpty()) {
+            if (images.size > 1) videos + images else videos
+        } else images
         if (media.isEmpty()) return null
         val accessToken = findAccessToken(note).ifBlank { findAccessToken(state) }
         val profileTokenPattern = Regex("/user/profile/[^\"'?]+[^\"']*[?&]xsec_token=([^&\"']+)")
@@ -119,7 +124,7 @@ internal object XiaohongshuPageNormalizer {
 
     private fun findNote(value: Any?): JSONObject? = when (value) {
         is JSONObject -> {
-            if (value.has("noteId") && (value.has("imageList") || value.has("video"))) value
+            if (value.has("noteId") && (value.has("imageList") || VIDEO_FIELDS.any(value::has))) value
             else value.keys().asSequence().mapNotNull { findNote(value.opt(it)) }.firstOrNull()
         }
         is JSONArray -> (0 until value.length()).asSequence().mapNotNull { findNote(value.opt(it)) }.firstOrNull()
@@ -148,13 +153,19 @@ internal object XiaohongshuPageNormalizer {
                     .mapNotNull { info.optJSONObject(it) }
                     .firstOrNull { it.optString("imageScene") == "H5_DTL" }
                     ?.optString("url")
-            }.orEmpty().ifBlank { image.optString("url") }.let(::secureUrl)
-            val fileId = image.optString("fileId").trim().trimStart('/')
-            val originalUrl = originalImageUrl(fileId, previewUrl)
+            }.orEmpty()
+                .ifBlank { image.optString("urlDefault") }
+                .ifBlank { image.optString("url") }
+                .ifBlank { image.optString("urlPre") }
+                .let(::secureUrl)
+            val originalUrls = originalImageUrls(image, previewUrl)
+            val originalUrl = originalUrls.firstOrNull().orEmpty()
             val selectedUrl = originalUrl.ifBlank { previewUrl }
             if (selectedUrl.isBlank()) continue
             val variants = buildList {
-                if (originalUrl.isNotBlank()) add(MediaVariant("original", originalUrl, width, height))
+                originalUrls.forEachIndexed { index, url ->
+                    add(MediaVariant(if (index == 0) "original" else "original_${index + 1}", url, width, height))
+                }
                 if (previewUrl.isNotBlank() && previewUrl != originalUrl) {
                     add(MediaVariant("web", previewUrl))
                 }
@@ -170,53 +181,171 @@ internal object XiaohongshuPageNormalizer {
                     thumbnailUrl = previewUrl,
                     variants = variants,
                     selectedVariantKey = variant.key,
+                    fallbackUrls = (originalUrls.drop(1) + previewUrl)
+                        .filter(String::isNotBlank)
+                        .distinct()
+                        .filterNot { it == selectedUrl },
                 ),
             )
         }
     }
 
-    private fun originalImageUrl(fileId: String, previewUrl: String): String {
-        if (fileId.isBlank()) return ""
-        val host = runCatching { URI(previewUrl).host.orEmpty() }.getOrDefault("")
-            .replace("sns-webpic", "sns-img")
+    private fun originalImageUrls(image: JSONObject, previewUrl: String): List<String> {
+        val traceId = image.optString("traceId").trim().trimStart('/')
+        val fileId = image.optString("fileId").trim().trimStart('/')
+        val token = traceId.ifBlank { fileId }.ifBlank { imageTokenFromUrl(previewUrl) }
+        if (token.isBlank()) return emptyList()
+
+        val previewHost = runCatching { URI(previewUrl).host.orEmpty() }.getOrDefault("")
+        val derivedHost = previewHost.replace("sns-webpic", "sns-img")
             .takeIf { it.endsWith(".xhscdn.com") }
-            ?: "sns-img-qc.xhscdn.com"
-        return "https://$host/$fileId"
+        return listOfNotNull(
+            "https://ci.xiaohongshu.com/$token",
+            "https://sns-img-bd.xhscdn.com/$token",
+            derivedHost?.let { "https://$it/$token" },
+        ).distinct()
+    }
+
+    private fun imageTokenFromUrl(value: String): String {
+        if (value.isBlank()) return ""
+        val path = runCatching { URI(value).rawPath.orEmpty() }.getOrDefault("")
+            .trim('/').substringBefore('!')
+        if (path.isBlank()) return ""
+        val marker = path.indexOf("notes_pre_post/")
+        if (marker >= 0) return path.substring(marker)
+        val segments = path.split('/')
+        if (segments.size > 2 && segments[0].matches(Regex("\\d{8,}"))) {
+            return segments.drop(2).joinToString("/")
+        }
+        if (segments.size > 1) return path
+        return segments.single().takeIf { it.length >= 20 && '.' !in it }.orEmpty()
     }
 
     private fun parseVideos(note: JSONObject, postId: String, thumbnailUrl: String): List<MediaItem> {
-        val candidates = mutableListOf<MediaVariant>()
-        // XHS has shipped several state shapes: video can be an object, array,
-        // direct URL, or live under videoInfo/video_info. Inspect all of them.
-        listOf("video", "videoInfo", "video_info", "playInfo", "play_info", "media").forEach { field ->
-            note.opt(field)?.let { collectVideoUrls(it, candidates, field) }
+        val groups = videoGroups(note)
+        return groups.mapIndexedNotNull { index, group ->
+            val candidates = mutableListOf<MediaVariant>()
+            collectVideoUrls(group, candidates)
+            val ranked = rankVideoCandidates(candidates.distinctBy(MediaVariant::url))
+            val selected = ranked.firstOrNull() ?: return@mapIndexedNotNull null
+            val cover = group as? JSONObject
+            val groupThumbnail = cover?.optString("cover").orEmpty().let(::secureUrl)
+                .ifBlank { thumbnailUrl }
+            MediaItem(
+                MediaType.VIDEO,
+                selected.url,
+                MediaQuality.PLATFORM_BEST,
+                postId,
+                index + 1,
+                thumbnailUrl = groupThumbnail,
+                variants = ranked,
+                selectedVariantKey = selected.key,
+                fallbackUrls = ranked.drop(1).map(MediaVariant::url),
+            )
         }
-        if (candidates.isEmpty()) collectVideoUrls(note, candidates, "video")
-        val ranked = MediaVariantSelector.rank(MediaType.VIDEO, candidates.distinctBy(MediaVariant::url))
-        val selected = ranked.firstOrNull() ?: return emptyList()
-        return listOf(MediaItem(MediaType.VIDEO, selected.url, MediaQuality.PLATFORM_BEST, postId, 1, thumbnailUrl = thumbnailUrl, variants = ranked, selectedVariantKey = selected.key))
     }
 
-    private fun collectVideoUrls(value: Any?, result: MutableList<MediaVariant>, key: String = "video") {
+    private fun rankVideoCandidates(candidates: List<MediaVariant>): List<MediaVariant> = candidates
+        .withIndex()
+        .sortedWith(
+            compareByDescending<IndexedValue<MediaVariant>> { it.value.pixelArea }
+                .thenByDescending { maxOf(it.value.width, it.value.height) }
+                .thenByDescending { it.value.bitrate }
+                .thenByDescending { MediaVariantSelector.inferVideoQuality(it.value.key, it.value.url).isOriginal }
+                .thenByDescending { MediaVariantSelector.inferVideoQuality(it.value.key, it.value.url).height }
+                .thenByDescending { xhsVideoSourcePriority(it.value.key) }
+                .thenBy { it.index },
+        )
+        .map { it.value }
+
+    private fun xhsVideoSourcePriority(key: String): Int = when {
+        key.contains("origin", ignoreCase = true) -> 3
+        key.contains("master", ignoreCase = true) -> 2
+        key.contains("backup", ignoreCase = true) -> 1
+        else -> 0
+    }
+
+    private fun videoGroups(note: JSONObject): List<Any?> {
+        val value = note.opt("video") ?: VIDEO_FIELDS.asSequence()
+            .drop(1)
+            .mapNotNull(note::opt)
+            .firstOrNull()
+        if (value is JSONArray && value.length() > 1 && (0 until value.length()).all { index ->
+                val item = value.optJSONObject(index) ?: return@all false
+                item.has("media") || item.has("consumer") || item.has("videoId") || item.has("video_id") || item.has("id")
+            }) {
+            return (0 until value.length()).map { value.opt(it) }
+        }
+        val explicit = listOf("videos", "videoList", "video_list", "mediaList")
+            .asSequence()
+            .mapNotNull { note.optJSONArray(it) }
+            .firstOrNull()
+        return if (explicit != null && explicit.length() > 0) {
+            (0 until explicit.length()).map { explicit.opt(it) }
+        } else {
+            listOf(value).filterNot { it == null || it == JSONObject.NULL }
+        }
+    }
+
+    private val VIDEO_FIELDS = listOf("video", "videoInfo", "video_info", "playInfo", "play_info", "media")
+
+    private fun collectVideoUrls(
+        value: Any?,
+        result: MutableList<MediaVariant>,
+        key: String = "video",
+        inheritedWidth: Int = 0,
+        inheritedHeight: Int = 0,
+        inheritedBitrate: Long = 0L,
+    ) {
         when (value) {
             is JSONObject -> {
-                val width = value.optInt("width")
-                val height = value.optInt("height")
-                val bitrate = value.optLong("bitrate", value.optLong("bit_rate", 0L))
-                value.keys().forEach { childKey -> collectVideoUrls(value.opt(childKey), result, childKey) }
+                val width = positiveInt(value, "width", "videoWidth", "video_width", "videoWidthPx")
+                    .takeIf { it > 0 } ?: inheritedWidth
+                val height = positiveInt(value, "height", "videoHeight", "video_height", "videoHeightPx")
+                    .takeIf { it > 0 } ?: inheritedHeight
+                val bitrate = positiveLong(value, "bitrate", "bit_rate", "avgBitrate", "avg_bitrate")
+                    .takeIf { it > 0 } ?: inheritedBitrate
+                value.keys().forEach { childKey ->
+                    collectVideoUrls(value.opt(childKey), result, childKey, width, height, bitrate)
+                }
                 value.optString("url").takeIf { it.isNotBlank() }?.let { url ->
-                    val normalized = secureUrl(url)
-                    if (isVideoUrl(normalized, key)) result += MediaVariant(key.ifBlank { "video" }, normalized, width, height, bitrate)
+                    addVideoVariant(url, key, width, height, bitrate, result)
                 }
             }
-            is JSONArray -> for (index in 0 until value.length()) collectVideoUrls(value.opt(index), result, key)
+            is JSONArray -> for (index in 0 until value.length()) {
+                collectVideoUrls(value.opt(index), result, key, inheritedWidth, inheritedHeight, inheritedBitrate)
+            }
             is String -> {
-                val url = secureUrl(value)
-                if (url.startsWith("https://") && isVideoUrl(url, key)) {
-                    result += MediaVariant(key.ifBlank { "video" }, url)
-                }
+                val raw = value.trim()
+                val url = if (raw.startsWith("http", true)) secureUrl(raw)
+                else if (key.contains("origin", true) && key.contains("video", true))
+                    "https://sns-video-bd.xhscdn.com/${raw.trimStart('/')}"
+                else ""
+                if (url.isNotBlank()) addVideoVariant(url, key, inheritedWidth, inheritedHeight, inheritedBitrate, result)
             }
         }
+    }
+
+    private fun positiveInt(value: JSONObject, vararg keys: String): Int = keys.asSequence()
+        .mapNotNull { value.opt(it)?.toString()?.toIntOrNull() }
+        .firstOrNull { it > 0 }
+        ?: 0
+
+    private fun positiveLong(value: JSONObject, vararg keys: String): Long = keys.asSequence()
+        .mapNotNull { value.opt(it)?.toString()?.toLongOrNull() }
+        .firstOrNull { it > 0L }
+        ?: 0L
+
+    private fun addVideoVariant(
+        url: String,
+        key: String,
+        width: Int,
+        height: Int,
+        bitrate: Long,
+        result: MutableList<MediaVariant>,
+    ) {
+        val normalized = secureUrl(url)
+        if (isVideoUrl(normalized, key)) result += MediaVariant(key.ifBlank { "video" }, normalized, width, height, bitrate)
     }
 
     private fun isVideoUrl(url: String, key: String): Boolean {
