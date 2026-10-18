@@ -26,6 +26,9 @@ internal object XiaohongshuLinkParser {
         "xhslink.cn", "www.xhslink.cn",
     )
     private val urlRegex = Regex("https?://[^\\s<>\\\"']+", RegexOption.IGNORE_CASE)
+    private val noteIdRegex = Regex("/(?:discovery/item|explore)/([0-9a-fA-F]{32}|[0-9a-fA-F]{24})(?=[/?#]|$)")
+
+    fun noteId(value: String): String = noteIdRegex.find(value)?.groupValues?.get(1).orEmpty()
 
     fun extractUrl(value: String): String = (urlRegex.find(value.trim())?.value ?: value.trim())
         .trimEnd('.', ',', '!', '?', ')', ']', '。', '！', '？', '，', '；', ';')
@@ -56,6 +59,8 @@ internal data class XiaohongshuPostData(
     val accessToken: String,
     val profileAccessToken: String,
     val media: List<MediaItem>,
+    val expectedMediaCount: Int = media.size,
+    val unresolvedMediaCount: Int = 0,
 )
 
 internal object XiaohongshuPageNormalizer {
@@ -65,7 +70,7 @@ internal object XiaohongshuPageNormalizer {
     )
 
     fun normalize(html: String, fallbackId: String = "xhs"): XiaohongshuPostData? {
-        val state = pageStateMarkers.asSequence().mapNotNull { marker ->
+        val states = pageStateMarkers.mapNotNull { marker ->
             val markerStart = html.indexOf(marker)
             if (markerStart < 0) return@mapNotNull null
             val stateStart = html.indexOf('{', markerStart)
@@ -73,18 +78,30 @@ internal object XiaohongshuPageNormalizer {
             if (stateStart < 0 || scriptEnd < 0) return@mapNotNull null
             val stateText = html.substring(stateStart, scriptEnd).trim().removeSuffix(";")
             runCatching { JSONObject(stateText) }.getOrNull()
-        }.firstOrNull() ?: return null
-        return normalizeState(state, fallbackId, html)
+        }
+        return normalizeStates(states, fallbackId, html)
     }
 
     fun normalizePayload(payload: String, fallbackId: String = "xhs"): XiaohongshuPostData? {
         val state = runCatching { JSONObject(payload) }.getOrNull() ?: return null
-        return normalizeState(state, fallbackId, "")
+        return normalizeStates(listOf(state), fallbackId, "")
     }
 
-    private fun normalizeState(state: JSONObject, fallbackId: String, html: String): XiaohongshuPostData? {
-        val note = findNote(state) ?: return null
-        val id = note.optString("noteId").ifBlank { fallbackId }
+    private fun normalizeStates(states: List<JSONObject>, expectedId: String, html: String): XiaohongshuPostData? {
+        val notes = states.flatMap { findNotes(it).toList() }
+        val targetId = expectedId.takeIf { it.isNotBlank() && it != "xhs" }
+            ?: notes.firstOrNull()?.optString("noteId") ?: return null
+        // Different state stores can contain a shell, a recommendation card,
+        // and a complete detail for the same page. Only compare the target's
+        // own representations; never merge attachments across unrelated notes.
+        return notes.asSequence().filter { it.optString("noteId") == targetId }
+            .mapNotNull { normalizeNote(it, html) }
+            .maxWithOrNull(compareBy<XiaohongshuPostData> { it.expectedMediaCount }
+                .thenBy { -it.unresolvedMediaCount }.thenBy { it.media.size })
+    }
+
+    private fun normalizeNote(note: JSONObject, html: String): XiaohongshuPostData? {
+        val id = note.optString("noteId")
         val user = note.optJSONObject("user") ?: JSONObject()
         val author = user.optString("nickName").ifBlank { user.optString("nickname") }
         val images = parseImages(note.optJSONArray("imageList"), id)
@@ -92,14 +109,24 @@ internal object XiaohongshuPageNormalizer {
             image.thumbnailUrl.ifBlank { image.url }
         }.orEmpty()
         val videos = parseVideos(note, id, videoThumbnailUrl)
+        val rawImages = note.optJSONArray("imageList")
+        val rawImageCount = rawImages?.length() ?: 0
+        val hasLivePhotos = (0 until rawImageCount).any { rawImages?.optJSONObject(it)?.optBoolean("livePhoto") == true }
+        val galleryIsContent = videoGroups(note).isEmpty() || rawImageCount > 1 || hasLivePhotos
+        val unresolvedImages = if (galleryIsContent) (0 until rawImageCount).count { index ->
+            val item = images.firstOrNull { it.ordinal == index + 1 }
+            item == null || rawImages?.optJSONObject(index)?.optBoolean("livePhoto") == true &&
+                (item.type != MediaType.LIVE_PHOTO || item.coverUrl.isBlank())
+        } else 0
+        val unresolvedVideos = (videoGroups(note).size - videos.size).coerceAtLeast(0)
         // A video note normally exposes one poster image, but some notes expose
         // a gallery together with a video. Keep every real attachment instead
         // of dropping the gallery just because a video field is present.
         val media = if (videos.isNotEmpty()) {
-            if (images.size > 1) videos + images else videos
+            if (images.size > 1 || images.any { it.type == MediaType.LIVE_PHOTO }) videos + images else videos
         } else images
         if (media.isEmpty()) return null
-        val accessToken = findAccessToken(note).ifBlank { findAccessToken(state) }
+        val accessToken = findAccessToken(note)
         val profileTokenPattern = Regex("/user/profile/[^\"'?]+[^\"']*[?&]xsec_token=([^&\"']+)")
         val profileHtml = html.replace("&amp;", "&")
             .replace("\\u002F", "/")
@@ -119,16 +146,20 @@ internal object XiaohongshuPageNormalizer {
             accessToken = accessToken,
             profileAccessToken = profileAccessToken,
             media = media,
+            expectedMediaCount = videoGroups(note).size + if (galleryIsContent) rawImageCount else 0,
+            unresolvedMediaCount = unresolvedImages + unresolvedVideos,
         )
     }
 
-    private fun findNote(value: Any?): JSONObject? = when (value) {
-        is JSONObject -> {
-            if (value.has("noteId") && (value.has("imageList") || VIDEO_FIELDS.any(value::has))) value
-            else value.keys().asSequence().mapNotNull { findNote(value.opt(it)) }.firstOrNull()
+    private fun findNotes(value: Any?): Sequence<JSONObject> = sequence {
+        when (value) {
+            is JSONObject -> {
+                if (value.optString("noteId").isNotBlank() &&
+                    (value.has("imageList") || (VIDEO_FIELDS + VIDEO_LIST_FIELDS).any(value::has))) yield(value)
+                for (key in value.keys()) yieldAll(findNotes(value.opt(key)))
+            }
+            is JSONArray -> for (index in 0 until value.length()) yieldAll(findNotes(value.opt(index)))
         }
-        is JSONArray -> (0 until value.length()).asSequence().mapNotNull { findNote(value.opt(it)) }.firstOrNull()
-        else -> null
     }
 
     private fun findAccessToken(value: Any?): String = when (value) {
@@ -161,7 +192,6 @@ internal object XiaohongshuPageNormalizer {
             val originalUrls = originalImageUrls(image, previewUrl)
             val originalUrl = originalUrls.firstOrNull().orEmpty()
             val selectedUrl = originalUrl.ifBlank { previewUrl }
-            if (selectedUrl.isBlank()) continue
             val variants = buildList {
                 originalUrls.forEachIndexed { index, url ->
                     add(MediaVariant(if (index == 0) "original" else "original_${index + 1}", url, width, height))
@@ -170,6 +200,35 @@ internal object XiaohongshuPageNormalizer {
                     add(MediaVariant("web", previewUrl))
                 }
             }
+            // Live-photo clips belong to their individual gallery entries, not
+            // to the note-level video (which can be a generated slideshow).
+            val liveCandidates = mutableListOf<MediaVariant>()
+            if (image.optBoolean("livePhoto")) {
+                collectVideoUrls(image.opt("stream"), liveCandidates)
+            }
+            val liveVariants = rankVideoCandidates(liveCandidates.distinctBy(MediaVariant::url))
+            val live = liveVariants.firstOrNull()
+            if (live != null) {
+                add(
+                    MediaItem(
+                        type = MediaType.LIVE_PHOTO,
+                        url = live.url,
+                        quality = MediaQuality.LIVE_ORIGINAL,
+                        postId = postId,
+                        ordinal = index + 1,
+                        thumbnailUrl = previewUrl.ifBlank { selectedUrl },
+                        coverUrl = selectedUrl,
+                        coverFallbackUrls = (originalUrls.drop(1) + previewUrl)
+                            .filter(String::isNotBlank).distinct().filterNot { it == selectedUrl },
+                        variants = liveVariants,
+                        selectedVariantKey = live.key,
+                        fallbackUrls = liveVariants.drop(1).map(MediaVariant::url),
+                        sourceId = image.optString("traceId").ifBlank { image.optString("fileId") },
+                    ),
+                )
+                continue
+            }
+            if (selectedUrl.isBlank()) continue
             val variant = variants.firstOrNull() ?: continue
             add(
                 MediaItem(
@@ -177,10 +236,11 @@ internal object XiaohongshuPageNormalizer {
                     url = selectedUrl,
                     quality = MediaQuality.ORIGINAL_BEST,
                     postId = postId,
-                    ordinal = size + 1,
+                    ordinal = index + 1,
                     thumbnailUrl = previewUrl,
                     variants = variants,
                     selectedVariantKey = variant.key,
+                    sourceId = image.optString("traceId").ifBlank { image.optString("fileId") },
                     fallbackUrls = (originalUrls.drop(1) + previewUrl)
                         .filter(String::isNotBlank)
                         .distinct()
@@ -241,6 +301,9 @@ internal object XiaohongshuPageNormalizer {
                 variants = ranked,
                 selectedVariantKey = selected.key,
                 fallbackUrls = ranked.drop(1).map(MediaVariant::url),
+                sourceId = cover?.optJSONObject("consumer")?.optString("originVideoKey").orEmpty()
+                    .ifBlank { cover?.optString("id").orEmpty() }
+                    .ifBlank { cover?.optJSONObject("media")?.optString("videoId").orEmpty() },
             )
         }
     }
@@ -266,20 +329,25 @@ internal object XiaohongshuPageNormalizer {
     }
 
     private fun videoGroups(note: JSONObject): List<Any?> {
-        val value = note.opt("video") ?: VIDEO_FIELDS.asSequence()
-            .drop(1)
+        val value = VIDEO_FIELDS.asSequence()
             .mapNotNull(note::opt)
+            .filter { value -> when (value) {
+                JSONObject.NULL -> false
+                is JSONObject -> value.length() > 0
+                is JSONArray -> value.length() > 0
+                is String -> value.isNotBlank()
+                else -> false
+            } }
             .firstOrNull()
-        if (value is JSONArray && value.length() > 1 && (0 until value.length()).all { index ->
-                val item = value.optJSONObject(index) ?: return@all false
-                item.has("media") || item.has("consumer") || item.has("videoId") || item.has("video_id") || item.has("id")
-            }) {
+        // An attachment array defines item boundaries. Codec/bitrate arrays
+        // remain inside each item and are collected as variants below.
+        if (value is JSONArray) {
             return (0 until value.length()).map { value.opt(it) }
         }
-        val explicit = listOf("videos", "videoList", "video_list", "mediaList")
+        val explicit = VIDEO_LIST_FIELDS
             .asSequence()
             .mapNotNull { note.optJSONArray(it) }
-            .firstOrNull()
+            .firstOrNull { it.length() > 0 }
         return if (explicit != null && explicit.length() > 0) {
             (0 until explicit.length()).map { explicit.opt(it) }
         } else {
@@ -288,6 +356,7 @@ internal object XiaohongshuPageNormalizer {
     }
 
     private val VIDEO_FIELDS = listOf("video", "videoInfo", "video_info", "playInfo", "play_info", "media")
+    private val VIDEO_LIST_FIELDS = listOf("videos", "videoList", "video_list", "mediaList")
 
     private fun collectVideoUrls(
         value: Any?,
@@ -296,6 +365,7 @@ internal object XiaohongshuPageNormalizer {
         inheritedWidth: Int = 0,
         inheritedHeight: Int = 0,
         inheritedBitrate: Long = 0L,
+        inheritedCodec: String = "",
     ) {
         when (value) {
             is JSONObject -> {
@@ -305,15 +375,18 @@ internal object XiaohongshuPageNormalizer {
                     .takeIf { it > 0 } ?: inheritedHeight
                 val bitrate = positiveLong(value, "bitrate", "bit_rate", "avgBitrate", "avg_bitrate")
                     .takeIf { it > 0 } ?: inheritedBitrate
+                val codec = MediaSourceIdentity.codec(value.optString("videoCodec").ifBlank { value.optString("video_codec") })
+                    .ifBlank { MediaSourceIdentity.codec(key) }.ifBlank { inheritedCodec }
                 value.keys().forEach { childKey ->
-                    collectVideoUrls(value.opt(childKey), result, childKey, width, height, bitrate)
+                    collectVideoUrls(value.opt(childKey), result, childKey, width, height, bitrate, codec)
                 }
                 value.optString("url").takeIf { it.isNotBlank() }?.let { url ->
-                    addVideoVariant(url, key, width, height, bitrate, result)
+                    addVideoVariant(url, key, width, height, bitrate, result, codec)
                 }
             }
             is JSONArray -> for (index in 0 until value.length()) {
-                collectVideoUrls(value.opt(index), result, key, inheritedWidth, inheritedHeight, inheritedBitrate)
+                collectVideoUrls(value.opt(index), result, key, inheritedWidth, inheritedHeight, inheritedBitrate,
+                    MediaSourceIdentity.codec(key).ifBlank { inheritedCodec })
             }
             is String -> {
                 val raw = value.trim()
@@ -321,7 +394,7 @@ internal object XiaohongshuPageNormalizer {
                 else if (key.contains("origin", true) && key.contains("video", true))
                     "https://sns-video-bd.xhscdn.com/${raw.trimStart('/')}"
                 else ""
-                if (url.isNotBlank()) addVideoVariant(url, key, inheritedWidth, inheritedHeight, inheritedBitrate, result)
+                if (url.isNotBlank()) addVideoVariant(url, key, inheritedWidth, inheritedHeight, inheritedBitrate, result, inheritedCodec)
             }
         }
     }
@@ -343,9 +416,10 @@ internal object XiaohongshuPageNormalizer {
         height: Int,
         bitrate: Long,
         result: MutableList<MediaVariant>,
+        codec: String = "",
     ) {
         val normalized = secureUrl(url)
-        if (isVideoUrl(normalized, key)) result += MediaVariant(key.ifBlank { "video" }, normalized, width, height, bitrate)
+        if (isVideoUrl(normalized, key)) result += MediaVariant(key.ifBlank { "video" }, normalized, width, height, bitrate, codec = codec)
     }
 
     private fun isVideoUrl(url: String, key: String): Boolean {
@@ -364,6 +438,9 @@ internal object XiaohongshuPageNormalizer {
 }
 
 class XiaohongshuClient(private val context: Context) {
+    private val extractNoteScript by lazy {
+        context.assets.open("xiaohongshu-note-extractor.js").bufferedReader().use { it.readText() }
+    }
     private val mainHandler = Handler(Looper.getMainLooper())
 
     private fun webViewRoot(activity: Activity): FrameLayout? =
@@ -395,12 +472,17 @@ class XiaohongshuClient(private val context: Context) {
             val finalUrl = connection.url.toString()
             val html = connection.inputStream.bufferedReader().use { it.readText() }
             Log.d("XhsClient", "response status=$status final=${xiaohongshuLogUrl(finalUrl)} html=${html.length}")
-            val fallbackId = Regex("/(?:discovery/item|explore)/((?:[0-9a-fA-F]{24}|[0-9a-fA-F]{32}))")
-                .find(source)?.groupValues?.getOrNull(1)
-                ?: Regex("/(?:discovery/item|explore)/((?:[0-9a-fA-F]{24}|[0-9a-fA-F]{32}))")
-                    .find(finalUrl)?.groupValues?.getOrNull(1)
-                ?: "xhs"
-            val data = XiaohongshuPageNormalizer.normalize(html, fallbackId)
+            val fallbackId = XiaohongshuLinkParser.noteId(source)
+                .ifBlank { XiaohongshuLinkParser.noteId(finalUrl) }.ifBlank { "xhs" }
+            val parsed = if (fallbackId == "xhs") null
+                else XiaohongshuPageNormalizer.normalize(html, fallbackId)
+            val data = if (parsed != null && parsed.unresolvedMediaCount > 0) {
+                // Keep usable attachments if the browser cannot fill the gaps,
+                // but never present that partial result as a complete parse.
+                runCatching { loadFromWebView(source, context.getString(R.string.xiaohongshu_no_media)) }
+                    .getOrNull()?.takeIf { it.id == parsed.id && it.expectedMediaCount >= parsed.expectedMediaCount &&
+                        it.unresolvedMediaCount < parsed.unresolvedMediaCount } ?: parsed
+            } else parsed
                 ?: loadFromWebView(source, context.getString(R.string.xiaohongshu_no_media))
             Log.d("XhsClient", "parsed id=${data.id} title=${data.title.take(80)} media=${data.media.size}")
             val resolvedSource = if (finalUrl.contains("/website-login/error")) source else finalUrl
@@ -446,30 +528,38 @@ class XiaohongshuClient(private val context: Context) {
             sourceUrl = sourceUrl,
             media = data.media,
             creator = creatorProfile,
+            notice = if (data.unresolvedMediaCount > 0) context.getString(
+                R.string.media_parse_incomplete, data.unresolvedMediaCount) else "",
         )
     }
 
     private fun loadFromWebView(sourceUrl: String, failureMessage: String): XiaohongshuPostData {
         Log.d("XhsClient", "webview start source=${xiaohongshuLogUrl(sourceUrl)}")
         val latch = CountDownLatch(1)
+        val run = ResolutionRequest()
         var result: XiaohongshuPostData? = null
         var failure: Throwable? = null
+        var activeView: WebView? = null
+        fun cleanUp() {
+            activeView?.let { view ->
+                (view.parent as? android.view.ViewGroup)?.removeView(view)
+                view.stopLoading()
+                view.destroy()
+            }
+            activeView = null
+        }
         mainHandler.post {
+            if (!run.isActive()) return@post
             val activity = context as? Activity
             val root = activity?.let(::webViewRoot)
-            if (activity == null || root == null) {
-                Log.d("XhsClient", "webview unavailable activity=${activity != null} root=${root != null}")
-                failure = XiaohongshuException(failureMessage)
-                latch.countDown()
-                return@post
-            }
-            val view = WebView(activity).apply {
+            val view = WebView(context).apply {
                 setBackgroundColor(Color.TRANSPARENT)
                 alpha = 0.01f
                 settings.javaScriptEnabled = true
                 settings.domStorageEnabled = true
                 settings.userAgentString = WEB_USER_AGENT
             }
+            activeView = view
             val cookieNames = XiaohongshuSession.cookieHeader().split(';')
                 .map { it.substringBefore('=').trim() }
                 .filter(String::isNotBlank)
@@ -481,28 +571,27 @@ class XiaohongshuClient(private val context: Context) {
             )
             var attempts = 0
             fun finish(value: XiaohongshuPostData?, error: Throwable?) {
-                if (result != null || failure != null) return
+                if (!run.finish()) return
                 Log.d("XhsClient", "webview finish url=${xiaohongshuLogUrl(view.url)} title=${view.title?.take(100)} parsed=${value != null} error=${error?.javaClass?.simpleName}")
                 result = value
                 failure = error
-                (view.parent as? FrameLayout)?.removeView(view)
-                view.stopLoading()
-                view.destroy()
+                cleanUp()
                 latch.countDown()
             }
             fun poll() {
-                if (result != null || failure != null) return
-                view.evaluateJavascript(EXTRACT_NOTE_SCRIPT) { raw ->
+                if (!run.isActive()) return
+                view.evaluateJavascript(extractNoteScript) { raw ->
+                    if (!run.isActive()) return@evaluateJavascript
                     val encoded = runCatching { org.json.JSONTokener(raw).nextValue() as? String }.getOrNull().orEmpty()
-                    val fallbackId = Regex("/(?:discovery/item|explore)/((?:[0-9a-fA-F]{24}|[0-9a-fA-F]{32}))")
-                        .find(view.url.orEmpty())?.groupValues?.getOrNull(1).orEmpty()
+                    val fallbackId = XiaohongshuLinkParser.noteId(sourceUrl)
+                        .ifBlank { XiaohongshuLinkParser.noteId(view.url.orEmpty()) }
                     val parsed = encoded.takeIf(String::isNotBlank)?.let { payload ->
                         XiaohongshuPageNormalizer.normalizePayload(payload, fallbackId)
                     }
                     if (attempts == 0 || parsed != null || attempts >= 20) {
                         Log.d("XhsClient", "webview poll attempt=$attempts url=${xiaohongshuLogUrl(view.url)} parsed=${parsed != null} payloadChars=${encoded.length}")
                     }
-                    if (parsed != null) finish(parsed, null)
+                    if (parsed != null && (parsed.unresolvedMediaCount == 0 || attempts >= 20)) finish(parsed, null)
                     else if (attempts++ < 20) mainHandler.postDelayed(::poll, 750)
                     else finish(null, XiaohongshuException(failureMessage))
                 }
@@ -510,52 +599,35 @@ class XiaohongshuClient(private val context: Context) {
             view.webViewClient = object : WebViewClient() {
                 override fun onPageFinished(view: WebView, url: String) {
                     Log.d("XhsClient", "webview finished url=${xiaohongshuLogUrl(url)} title=${view.title?.take(100)}")
-                    attempts = 0
-                    mainHandler.postDelayed(::poll, 500)
+                    if (run.startPollingOnce()) mainHandler.postDelayed(::poll, 500)
                 }
             }
             val params = FrameLayout.LayoutParams(
-                activity.resources.displayMetrics.widthPixels,
-                activity.resources.displayMetrics.heightPixels,
+                context.resources.displayMetrics.widthPixels,
+                context.resources.displayMetrics.heightPixels,
             )
-            params.leftMargin = -activity.resources.displayMetrics.widthPixels
-            root.addView(view, params)
+            params.leftMargin = -context.resources.displayMetrics.widthPixels
+            if (root != null) root.addView(view, params)
+            else view.layout(0, 0, params.width, params.height)
             view.loadUrl(sourceUrl)
         }
-        if (!latch.await(35, TimeUnit.SECONDS)) {
-            Log.d("XhsClient", "webview timeout source=${xiaohongshuLogUrl(sourceUrl)}")
-            throw XiaohongshuException(failureMessage)
+        try {
+            if (!latch.await(35, TimeUnit.SECONDS)) {
+                Log.d("XhsClient", "webview timeout source=${xiaohongshuLogUrl(sourceUrl)}")
+                throw XiaohongshuException(failureMessage)
+            }
+            return result ?: throw (failure as? XiaohongshuException ?: XiaohongshuException(failureMessage))
+        } finally {
+            run.cancel()
+            mainHandler.post(::cleanUp)
         }
-        return result ?: throw (failure as? XiaohongshuException ?: XiaohongshuException(failureMessage))
     }
 
     companion object {
         private const val WEB_USER_AGENT =
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
                 "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
-        private const val EXTRACT_NOTE_SCRIPT = """
-            (function() {
-              const state = window.__INITIAL_STATE__ || {};
-              const routeId = (location.pathname.match(/\/(?:explore|discovery\/item)\/([0-9a-fA-F]{24,32})/) || [])[1] || '';
-              const direct = state.noteData && state.noteData.data && state.noteData.data.noteData;
-              const mapped = routeId && state.note && state.note.noteDetailMap &&
-                state.note.noteDetailMap[routeId] && state.note.noteDetailMap[routeId].note;
-              let found = direct || mapped || null;
-              const seen = new Set();
-              const walk = value => {
-                if (found || !value || typeof value !== 'object' || seen.has(value)) return;
-                seen.add(value);
-                if (String(value.noteId || '') === routeId && (value.imageList || value.video)) {
-                  found = value;
-                  return;
-                }
-                Object.keys(value).forEach(key => walk(value[key]));
-              };
-              if (!found) walk(state);
-              try { return found && (found.noteId || found.imageList || found.video) ? JSON.stringify(found) : ''; }
-              catch (_) { return ''; }
-            })()
-        """
+
 
     }
 }

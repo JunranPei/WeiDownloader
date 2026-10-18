@@ -26,7 +26,7 @@ class DownloadDispatcher(
             .getBoolean("live_cover", false)
         val downloads = mediaItems.flatMap { media ->
             DownloadMediaPlanner.expand(media, includeLiveCover).mapIndexed { index, download ->
-                PlannedDownload(download, media.stableId.takeIf { index == 0 }.orEmpty())
+                PlannedDownload(download, media.stableId.takeIf { index == 0 }.orEmpty(), media, index > 0)
             }
         }
         if (downloads.isEmpty()) return Result(0)
@@ -53,14 +53,9 @@ class DownloadDispatcher(
             var registeredWorkId: String? = null
             try {
                 val workId = UUID.randomUUID()
+                val locator = DownloadLocator.create(platform, post, planned.parent, planned.cover)
                 val input = Data.Builder()
-                    .putString(SafDownloadWorker.KEY_URL, download.url)
-                    .putStringArray(
-                        SafDownloadWorker.KEY_FALLBACK_URLS,
-                        download.fallbackUrls.filter { it.isNotBlank() && it != download.url }.toTypedArray(),
-                    )
-                    .putString(SafDownloadWorker.KEY_AUDIO_URL, download.audioUrl)
-                    .putString(SafDownloadWorker.KEY_COOKIE, if (platform in setOf(Platform.WEIBO, Platform.REDDIT)) "" else cookie)
+                    .putString(SafDownloadWorker.KEY_LOCATOR, locator.encode())
                     .putString(SafDownloadWorker.KEY_PLATFORM, platform.key)
                     .putString(SafDownloadWorker.KEY_TREE_URI, destinationTreeUri)
                     .putString(SafDownloadWorker.KEY_FOLDER, folderName)
@@ -89,7 +84,8 @@ class DownloadDispatcher(
         return Result(queued)
     }
 
-    private data class PlannedDownload(val media: MediaItem, val mediaIdentity: String)
+    private data class PlannedDownload(val media: MediaItem, val mediaIdentity: String,
+        val parent: MediaItem, val cover: Boolean)
 
     private val Platform.referer: String
         get() = when (this) {
@@ -109,11 +105,14 @@ internal object DownloadMediaPlanner {
         add(media)
         if (includeLiveCover && media.type == MediaType.LIVE_PHOTO && media.coverUrl.isNotBlank()) {
             add(
-                media.copy(
+                MediaItem(
                     type = MediaType.IMAGE,
                     url = media.coverUrl,
                     quality = MediaQuality.ORIGINAL_BEST,
-                    coverUrl = "",
+                    postId = media.postId,
+                    ordinal = media.ordinal,
+                    thumbnailUrl = media.thumbnailUrl,
+                    fallbackUrls = media.coverFallbackUrls,
                 ),
             )
         }

@@ -99,6 +99,26 @@ internal class DownloadStatusStore(context: Context) {
 
     fun completeWorker(workId: String) = resolveWorker(workId, succeeded = true)
 
+    /** Recover a renewable intent for jobs queued by earlier builds, when their source record survives. */
+    fun legacyLocator(workId: String, media: MediaItem): DownloadLocator? = synchronized(LOCK) {
+        val root = readState()
+        val task = tasks(root).optJSONObject(workerTaskKey(workId)) ?: return@synchronized null
+        val workKey = task.optString(KEY_WORK_KEY)
+        val work = works(root).optJSONObject(workKey) ?: return@synchronized null
+        val platform = Platform.entries.firstOrNull { it.key == work.optString(KEY_PLATFORM) } ?: return@synchronized null
+        val source = work.optString(KEY_SOURCE_URL).takeIf(String::isNotBlank) ?: return@synchronized null
+        val postId = workKey.removePrefix("${platform.key}:").takeIf(String::isNotBlank) ?: return@synchronized null
+        val history = task.optString(KEY_HISTORY_KEY)
+        val stableId = history.substringBefore('|')
+        val ordinal = stableId.substringAfterLast(':').toIntOrNull() ?: return@synchronized null
+        val key = history.substringAfter('|', "")
+        val cover = media.type == MediaType.IMAGE && task.has(KEY_MEDIA_IDENTITY) && task.optString(KEY_MEDIA_IDENTITY).isBlank()
+        val identity = MediaSourceIdentity.keys(media).firstOrNull() ?: return@synchronized null
+        DownloadLocator(platform, source, postId, if (cover) MediaType.LIVE_PHOTO else media.type, ordinal,
+            identity, key, height = Regex("(\\d{2,5})p").find(key)?.groupValues?.get(1)?.toIntOrNull() ?: 0,
+            codec = MediaSourceIdentity.codec(key), cover = cover)
+    }
+
     fun failWorker(workId: String) = resolveWorker(workId, succeeded = false)
 
     fun successVersion(): Long = synchronized(LOCK) {

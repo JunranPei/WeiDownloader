@@ -185,6 +185,8 @@
     <string name="switch_platform">Switch download platform</string>
     <string name="douyin_url_not_found">No recognizable Douyin link was found.</string>
     <string name="douyin_no_media">No trusted images or video were found for this Douyin post.</string>
+    <string name="douyin_resolution_timeout">Douyin post resolution timed out. Please try again.</string>
+    <string name="media_parse_incomplete">%1$d media items could not be fully resolved. Only the available items are shown; please try again.</string>
     <string name="douyin_page_no_media">Douyin did not return media matching this post. Try again later.</string>
     <string name="douyin_read_failed">Could not read Douyin. Check that the link is public and still valid.</string>
     <string name="douyin_default_title">Douyin post</string>

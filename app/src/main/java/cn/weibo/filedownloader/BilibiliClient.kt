@@ -132,6 +132,7 @@ internal class BilibiliWebVideoPostProvider(
                 variants = ranked,
                 selectedVariantKey = selected.key,
                 audioUrl = selected.audioUrl,
+                sourceId = "$cid:${entry.key}",
             )
         }
         val owner = detail.optJSONObject("owner")

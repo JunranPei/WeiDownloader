@@ -225,6 +225,7 @@ internal object DouyinWorkNormalizer {
                         thumbnailUrl = stillUrl,
                         variants = listOf(MediaVariant(key, stillUrl, width, height)),
                         selectedVariantKey = key,
+                        sourceId = image?.stringFrom("uri", "id", "image_id").orEmpty(),
                     ),
                 )
             }
@@ -285,6 +286,8 @@ internal object DouyinWorkNormalizer {
             coverUrl = coverUrl,
             variants = ranked,
             selectedVariantKey = best.key,
+            sourceId = video.stringFrom("vid", "id", "video_id")
+                .ifBlank { video.optObjectFrom("play_addr", "playAddr")?.stringFrom("uri").orEmpty() },
         )
     }
 

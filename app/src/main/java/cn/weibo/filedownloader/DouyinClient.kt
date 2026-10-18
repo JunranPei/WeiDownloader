@@ -1,14 +1,18 @@
 package cn.weibo.filedownloader
 
 import android.app.Activity
+import android.content.Context
 import android.graphics.Color
 import android.media.MediaMetadataRetriever
 import android.os.Handler
 import android.os.Looper
+import android.util.Log
 import android.view.View
 import android.webkit.WebChromeClient
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import android.webkit.WebResourceError
+import android.webkit.WebResourceRequest
 import android.widget.FrameLayout
 import org.json.JSONArray
 import org.json.JSONTokener
@@ -25,7 +29,7 @@ import java.util.concurrent.atomic.AtomicBoolean
  * platform-specific behavior. The official detail response is the primary
  * source; strictly ID-scoped WebView and SEO-page parsers are fallbacks.
  */
-class DouyinClient(private val activity: Activity) {
+class DouyinClient(private val context: Context) {
     private val handler = Handler(Looper.getMainLooper())
     private val executor = Executors.newSingleThreadExecutor()
     private val linkResolver = DouyinLinkResolver()
@@ -34,46 +38,56 @@ class DouyinClient(private val activity: Activity) {
         DouyinWebDetailProvider("1128"),
     )
     private var webView: WebView? = null
-    private var finished = AtomicBoolean(false)
+    private var request: ResolutionRequest? = null
 
     fun loadPost(sharedUrl: String, quality: QualityPreference, callback: (Result<WeiboPost>) -> Unit) {
         val sourceUrl = DouyinLinkParser.extractUrl(sharedUrl)
         if (sourceUrl.isBlank()) {
-            callback(Result.failure(DouyinException(activity.getString(R.string.douyin_url_not_found))))
+            callback(Result.failure(DouyinException(context.getString(R.string.douyin_url_not_found))))
             return
         }
-        finished = AtomicBoolean(false)
+        request?.cancel()
+        removeWebView()
+        val run = ResolutionRequest().also { request = it }
+        handler.postDelayed({
+            if (run.finish()) {
+                removeWebView()
+                callback(Result.failure(DouyinException(context.getString(R.string.douyin_resolution_timeout))))
+            }
+        }, RESOLUTION_TIMEOUT_MS)
         executor.execute {
             val targetResult = runCatching { linkResolver.resolve(sourceUrl) }
-            val apiResult = targetResult.mapCatching(::loadFromDetailProviders)
+            if (!run.isActive()) return@execute
+            val apiResult = targetResult.mapCatching { hydrateMediaMetadata(loadFromDetailProviders(it)) }
             handler.post {
+                if (!run.isActive()) return@post
                 if (apiResult.isSuccess) {
-                    if (!finished.getAndSet(true)) callback(apiResult)
+                    if (run.finish()) callback(apiResult)
                     return@post
                 }
-                if (finished.get()) return@post
                 val target = targetResult.getOrNull()
                 if (target == null) {
-                    if (!finished.getAndSet(true)) {
-                        callback(Result.failure(DouyinException(activity.getString(R.string.douyin_url_not_found))))
+                    if (run.finish()) {
+                        callback(Result.failure(DouyinException(context.getString(R.string.douyin_url_not_found))))
                     }
                     return@post
                 }
-                loadWithWebView(target, quality) { webResult ->
-                    if (finished.getAndSet(true)) return@loadWithWebView
+                loadWithWebView(target, quality, run) { webResult ->
+                    if (!run.isActive()) return@loadWithWebView
                     removeWebView()
                     if (webResult.isSuccess) {
                         executor.execute {
                             val post = webResult.getOrThrow()
                             val hydrated = runCatching { hydrateMediaMetadata(post) }.getOrDefault(post)
-                            handler.post { callback(Result.success(hydrated)) }
+                            handler.post { if (run.finish()) callback(Result.success(hydrated)) }
                         }
                     } else {
                         executor.execute {
                             val fallback = runCatching { hydrateMediaMetadata(loadFromHtml(target, quality)) }
                             handler.post {
+                                if (!run.finish()) return@post
                                 if (fallback.isSuccess) callback(fallback)
-                                else callback(Result.failure(apiResult.exceptionOrNull() ?: webResult.exceptionOrNull() ?: fallback.exceptionOrNull() ?: DouyinException(activity.getString(R.string.douyin_no_media))))
+                                else callback(Result.failure(apiResult.exceptionOrNull() ?: webResult.exceptionOrNull() ?: fallback.exceptionOrNull() ?: DouyinException(context.getString(R.string.douyin_no_media))))
                             }
                         }
                     }
@@ -94,19 +108,20 @@ class DouyinClient(private val activity: Activity) {
                 } ?: continue
                 return WeiboPost(
                     id = work.id,
-                    text = work.title.ifBlank { activity.getString(R.string.douyin_default_title) },
-                    author = work.author.ifBlank { activity.getString(R.string.douyin_default_author) },
+                    text = work.title.ifBlank { context.getString(R.string.douyin_default_title) },
+                    author = work.author.ifBlank { context.getString(R.string.douyin_default_author) },
                     sourceUrl = target.sourceUrl,
                     media = work.media,
                     creator = work.creator,
                 )
             }
         }
-        throw lastFailure ?: DouyinException(activity.getString(R.string.douyin_no_media))
+        throw lastFailure ?: DouyinException(context.getString(R.string.douyin_no_media))
     }
 
     fun close() {
-        finished.set(true)
+        request?.cancel()
+        handler.removeCallbacksAndMessages(null)
         handler.post { removeWebView() }
         executor.shutdownNow()
     }
@@ -114,28 +129,48 @@ class DouyinClient(private val activity: Activity) {
     private fun loadWithWebView(
         target: DouyinResolvedLink,
         quality: QualityPreference,
+        run: ResolutionRequest,
         callback: (Result<WeiboPost>) -> Unit,
     ) {
         handler.post {
-            val root = activity.findViewById<View>(R.id.rootLayout) as? FrameLayout
-                ?: (activity.window.decorView.findViewById(android.R.id.content) as FrameLayout)
-            val view = WebView(activity).apply {
+            if (!run.isActive()) return@post
+            val browserFinished = AtomicBoolean(false)
+            fun finishBrowser(result: Result<WeiboPost>) {
+                if (run.isActive() && browserFinished.compareAndSet(false, true)) callback(result)
+            }
+            val activity = context as? Activity
+            val root = activity?.findViewById<View>(R.id.rootLayout) as? FrameLayout
+                ?: activity?.window?.decorView?.findViewById<FrameLayout>(android.R.id.content)
+            val view = WebView(context).apply {
                 setBackgroundColor(Color.TRANSPARENT)
                 alpha = 0.01f
                 visibility = View.VISIBLE
                 settings.javaScriptEnabled = true
                 settings.domStorageEnabled = true
                 settings.mediaPlaybackRequiresUserGesture = false
-                settings.userAgentString = WEB_USER_AGENT
+                settings.userAgentString = if (URL(target.canonicalUrl).host.endsWith("iesdouyin.com")) {
+                    MOBILE_USER_AGENT
+                } else WEB_USER_AGENT
                 webViewClient = object : WebViewClient() {
+                    override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean =
+                        request.url.scheme !in listOf("http", "https")
+
+                    override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
+                        if (request.isForMainFrame) {
+                            Log.d("DouyinClient", "page load error=${error.errorCode} description=${error.description}")
+                        }
+                    }
+
                     override fun onPageFinished(view: WebView, url: String) {
+                        if (!run.startPollingOnce()) return
                         pollPage(
                             view,
                             target.sourceUrl,
-                            DouyinLinkParser.extractPostId(url).ifBlank { target.primaryPostId },
+                            target.primaryPostId,
                             quality,
+                            run,
                             0,
-                            callback,
+                            ::finishBrowser,
                         )
                     }
                 }
@@ -143,11 +178,15 @@ class DouyinClient(private val activity: Activity) {
             }
             webView = view
             val params = FrameLayout.LayoutParams(
-                activity.resources.displayMetrics.widthPixels,
-                activity.resources.displayMetrics.heightPixels,
+                context.resources.displayMetrics.widthPixels,
+                context.resources.displayMetrics.heightPixels,
             )
-            view.translationX = -activity.resources.displayMetrics.widthPixels.toFloat()
-            root.addView(view, params)
+            view.translationX = -context.resources.displayMetrics.widthPixels.toFloat()
+            if (root != null) root.addView(view, params)
+            else view.layout(0, 0, params.width, params.height)
+            handler.postDelayed({
+                finishBrowser(Result.failure(DouyinException(context.getString(R.string.douyin_page_no_media))))
+            }, BROWSER_TIMEOUT_MS)
             view.loadUrl(target.canonicalUrl)
         }
     }
@@ -157,26 +196,28 @@ class DouyinClient(private val activity: Activity) {
         sourceUrl: String,
         postId: String,
         quality: QualityPreference,
+        run: ResolutionRequest,
         attempt: Int,
         callback: (Result<WeiboPost>) -> Unit,
     ) {
-        if (finished.get()) return
+        if (!run.isActive() || webView !== view) return
         if (postId.isBlank()) {
             if (attempt < MAX_PAGE_POLLS) {
-                handler.postDelayed({ pollPage(view, sourceUrl, DouyinLinkParser.extractPostId(view.url.orEmpty()), quality, attempt + 1, callback) }, PAGE_POLL_DELAY_MS)
+                handler.postDelayed({ pollPage(view, sourceUrl, postId, quality, run, attempt + 1, callback) }, PAGE_POLL_DELAY_MS)
             } else {
-                callback(Result.failure(DouyinException(activity.getString(R.string.douyin_page_no_media))))
+                callback(Result.failure(DouyinException(context.getString(R.string.douyin_page_no_media))))
             }
             return
         }
         view.evaluateJavascript(buildExtractScript(postId)) { raw ->
+            if (!run.isActive() || webView !== view) return@evaluateJavascript
             val parsed = parseWebResult(raw, sourceUrl, postId, quality)
             if (parsed != null) {
                 callback(Result.success(parsed))
             } else if (attempt < MAX_PAGE_POLLS) {
-                handler.postDelayed({ pollPage(view, sourceUrl, postId, quality, attempt + 1, callback) }, PAGE_POLL_DELAY_MS)
+                handler.postDelayed({ pollPage(view, sourceUrl, postId, quality, run, attempt + 1, callback) }, PAGE_POLL_DELAY_MS)
             } else {
-                callback(Result.failure(DouyinException(activity.getString(R.string.douyin_page_no_media))))
+                callback(Result.failure(DouyinException(context.getString(R.string.douyin_page_no_media))))
             }
         }
     }
@@ -185,8 +226,22 @@ class DouyinClient(private val activity: Activity) {
         val value = runCatching { JSONTokener(raw).nextValue() as? String }.getOrNull() ?: return null
         val data = runCatching { JSONObject(value) }.getOrNull() ?: return null
         if (data.optString("id") != postId) return null
-        val title = data.optString("title").ifBlank { activity.getString(R.string.douyin_default_title) }
-        val author = data.optString("author").ifBlank { activity.getString(R.string.douyin_default_author) }
+        data.optJSONArray("details")?.let { details ->
+            (0 until details.length()).mapNotNull { index ->
+                details.optJSONObject(index)?.let { DouyinWorkNormalizer.normalize(it, postId) }
+            }.maxByOrNull { it.media.size }?.let { work ->
+                return WeiboPost(
+                    id = work.id,
+                    text = work.title.ifBlank { context.getString(R.string.douyin_default_title) },
+                    author = work.author.ifBlank { context.getString(R.string.douyin_default_author) },
+                    sourceUrl = sourceUrl,
+                    media = work.media,
+                    creator = work.creator,
+                )
+            }
+        }
+        val title = data.optString("title").ifBlank { context.getString(R.string.douyin_default_title) }
+        val author = data.optString("author").ifBlank { context.getString(R.string.douyin_default_author) }
         val images = data.optJSONArray("images")?.toStringList()
             ?.filter(DouyinContentPolicy::isContentImageUrl)
             ?.distinct()
@@ -204,9 +259,7 @@ class DouyinClient(private val activity: Activity) {
         }
         val scopedVideo = data.optString("video")
             .takeIf(DouyinContentPolicy::isScopedVideoUrl)
-        val resourceVideo = data.optJSONArray("resources")?.toStringList()
-            ?.lastOrNull(DouyinContentPolicy::isTrustedVideoResource)
-        val videoUrl = scopedVideo ?: resourceVideo ?: return null
+        val videoUrl = scopedVideo ?: return null
         return WeiboPost(
             id = postId,
             text = title,
@@ -248,7 +301,7 @@ class DouyinClient(private val activity: Activity) {
             }
             if (post != null) return post
         }
-        throw lastFailure ?: DouyinException(activity.getString(R.string.douyin_no_media))
+        throw lastFailure ?: DouyinException(context.getString(R.string.douyin_no_media))
     }
 
     private fun parseJsonLdPost(body: String, sourceUrl: String, postId: String): WeiboPost? {
@@ -266,9 +319,9 @@ class DouyinClient(private val activity: Activity) {
             }.filter(DouyinContentPolicy::isContentImageUrl).distinct()
             if (images.isEmpty()) continue
             val title = data.optString("headline").ifBlank { data.optString("description") }
-                .ifBlank { activity.getString(R.string.douyin_default_title) }
+                .ifBlank { context.getString(R.string.douyin_default_title) }
             val author = data.optJSONObject("author")?.optString("name").orEmpty()
-                .ifBlank { activity.getString(R.string.douyin_default_author) }
+                .ifBlank { context.getString(R.string.douyin_default_author) }
             return WeiboPost(
                 id = postId,
                 text = title,
@@ -288,19 +341,7 @@ class DouyinClient(private val activity: Activity) {
                 return@map item
             }
             val probe = probeMedia(item.url) ?: return@map item
-            val key = when {
-                probe.height > 0 -> "${probe.height}p"
-                probe.bitrate > 0L -> "${(probe.bitrate / 1000L).coerceAtLeast(1L)} kbps"
-                else -> "best available"
-            }
-            val variant = MediaVariant(
-                key = key,
-                url = item.url,
-                width = probe.width,
-                height = probe.height,
-                bitrate = probe.bitrate,
-            )
-            item.copy(variants = listOf(variant), selectedVariantKey = key)
+            item.withProbedMetadata(probe.width, probe.height, probe.bitrate)
         },
     )
 
@@ -351,57 +392,24 @@ class DouyinClient(private val activity: Activity) {
         .replace("&lt;", "<")
         .replace("&gt;", ">")
 
-    private fun buildExtractScript(postId: String): String = """
-        (function() {
-          const id = ${JSONObject.quote(postId)};
-          const canonical = document.querySelector("link[rel='canonical']")?.href || location.href;
-          const pageMatches = canonical.includes(id) || location.pathname.includes(id);
-          if (!pageMatches) return JSON.stringify({id: ''});
+    private val extractionTemplate by lazy {
+        context.assets.open("douyin-post-extractor.js").bufferedReader().use { it.readText() }
+    }
 
-          let article = null;
-          for (const node of document.querySelectorAll("script[type='application/ld+json']")) {
-            try {
-              const value = JSON.parse(node.textContent || '{}');
-              if (String(value?.url || '').includes(id) && String(value?.['@type'] || '').toLowerCase() === 'article') {
-                article = value;
-                break;
-              }
-            } catch (_) {}
-          }
-          if (article) {
-            const values = Array.isArray(article.image) ? article.image : [article.image];
-            const images = values.map(value => typeof value === 'string' ? value : value?.url || value?.contentUrl || '').filter(Boolean);
-            const author = typeof article.author === 'object' ? article.author?.name || '' : article.author || '';
-            return JSON.stringify({id, images, title: article.headline || article.description || '', author});
-          }
-
-          const exactContainer = document.querySelector('[class~="video_' + id + '"]');
-          const marker = document.querySelector('[data-e2e-aweme-id="' + id + '"]');
-          const scope = exactContainer || marker?.closest('[data-e2e="video-detail"]');
-          const video = scope?.querySelector('video') || null;
-          if (video) {
-            video.muted = true;
-            const promise = video.play();
-            if (promise?.catch) promise.catch(() => {});
-          }
-          const directVideo = video?.currentSrc || video?.src || video?.querySelector('source')?.src || '';
-          const resources = performance.getEntriesByType('resource')
-            .map(entry => entry.name || '')
-            .filter(url => /(?:^|\\.)i?douyinvod\\.com|\\/aweme\\/v1\\/(?:play|playwm)\\//i.test(url));
-          const title = document.querySelector("meta[name='description']")?.content || document.title || '';
-          const author = marker?.querySelector("[class*='author']")?.textContent || '';
-          return JSON.stringify({id, video: directVideo, resources, poster: video?.poster || '', title, author});
-        })()
-    """.trimIndent()
+    private fun buildExtractScript(postId: String): String =
+        extractionTemplate.replace("__POST_ID_JSON__", JSONObject.quote(postId))
 
     class DouyinException(message: String) : RuntimeException(message)
 
     private companion object {
         const val WEB_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
+        const val MOBILE_USER_AGENT = "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/130.0.0.0 Mobile Safari/537.36"
         const val SEO_USER_AGENT = "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)"
         const val DOWNLOAD_USER_AGENT = "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/126 Mobile Safari/537.36"
         val JSON_LD_REGEX = Regex("<script[^>]+type=[\\\"']application/ld\\+json[\\\"'][^>]*>(.*?)</script>", setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL))
         const val PAGE_POLL_DELAY_MS = 450L
-        const val MAX_PAGE_POLLS = 18
+        const val MAX_PAGE_POLLS = 60
+        const val BROWSER_TIMEOUT_MS = 30_000L
+        const val RESOLUTION_TIMEOUT_MS = 90_000L
     }
 }

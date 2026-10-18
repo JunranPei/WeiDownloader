@@ -50,6 +50,10 @@ data class MediaItem(
     val originalHeight: Int = 0,
     /** Same-media alternate URLs to try if the selected URL is unavailable. */
     val fallbackUrls: List<String> = emptyList(),
+    /** Alternate still-image sources; never interchangeable with the paired clip. */
+    val coverFallbackUrls: List<String> = emptyList(),
+    /** Platform attachment identity, independent of its position and signed delivery URL. */
+    val sourceId: String = "",
 ) {
     val stableId: String get() = "${type.name}:$postId:$ordinal"
 
@@ -85,6 +89,21 @@ data class MediaItem(
     }
 }
 
+/** Enrich one selected source without discarding alternate encodings or changing item identity. */
+internal fun MediaItem.withProbedMetadata(width: Int, height: Int, bitrate: Long): MediaItem {
+    val source = variants.firstOrNull { it.url == url }
+        ?: MediaVariant(if (height > 0) "${height}p" else "best available", url)
+    val enriched = source.copy(
+        width = width.takeIf { it > 0 } ?: source.width,
+        height = height.takeIf { it > 0 } ?: source.height,
+        bitrate = bitrate.takeIf { it > 0 } ?: source.bitrate,
+        dimensionsVerified = width > 0 && height > 0 || source.dimensionsVerified,
+    )
+    val sources = if (variants.any { it.url == url }) variants.map { if (it.url == url) enriched else it }
+        else variants + enriched
+    return copy(variants = sources, selectedVariantKey = enriched.key)
+}
+
 internal object MediaFileTypes {
     private val imageExtensions = setOf("jpg", "jpeg", "png", "webp", "gif", "heic", "heif", "avif")
     private val videoExtensions = setOf("mp4", "mov", "m4v", "webm", "mkv", "m3u8")
@@ -117,6 +136,7 @@ data class MediaVariant(
     val bitrate: Long = 0L,
     val audioUrl: String = "",
     val dimensionsVerified: Boolean = false,
+    val codec: String = "",
 ) {
     val pixelArea: Long get() = width.toLong() * height.toLong()
 }

@@ -5,6 +5,117 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class XiaohongshuParserTest {
+    @Test fun linkIdentityNeverTruncatesA32CharacterId() {
+        val id = "60f9bfde158b4ae9bd0e81e60184bfb4"
+        assertEquals(id, XiaohongshuLinkParser.noteId("https://www.xiaohongshu.com/explore/$id?xsec_token=test"))
+        assertEquals("", XiaohongshuLinkParser.noteId("https://www.xiaohongshu.com/explore/${id}1"))
+    }
+
+    @Test fun aMissingStillImageDoesNotHideAPlayableLiveClip() {
+        val payload = """{"noteId":"target","imageList":[{"livePhoto":true,"stream":{"h264":[{"masterUrl":"https://sns-video-qc.xhscdn.com/live.mp4"}]}}]}"""
+        val data = requireNotNull(XiaohongshuPageNormalizer.normalizePayload(payload))
+        assertEquals(MediaType.LIVE_PHOTO, data.media.single().type)
+        assertEquals(1, data.unresolvedMediaCount)
+    }
+    @Test fun triesEveryPageStateAndPrefersTheCompleteTargetNote() {
+        val html = """<script>window.__INITIAL_STATE__={"note":{"noteId":"target","imageList":[{"url":"https://img.example/one.jpg"}]}}</script>
+            <script>window.__SETUP_SERVER_STATE__={"note":{"noteId":"target","imageList":[{"url":"https://img.example/one.jpg"},{"url":"https://img.example/two.jpg"}]}}</script>"""
+        assertEquals(2, requireNotNull(XiaohongshuPageNormalizer.normalize(html, "target")).media.size)
+    }
+
+    @Test fun emptyInitialStateDoesNotHideAUsableServerState() {
+        val html = """<script>window.__INITIAL_STATE__={}</script><script>window.__SETUP_SERVER_STATE__={"noteId":"target","imageList":[{"url":"https://img.example/one.jpg"}]}</script>"""
+        assertEquals("target", requireNotNull(XiaohongshuPageNormalizer.normalize(html, "target")).id)
+    }
+
+    @Test fun neverSubstitutesAnotherNoteForTheRequestedId() {
+        val payload = """{"noteId":"other","imageList":[{"url":"https://img.example/one.jpg"}]}"""
+        assertEquals(null, XiaohongshuPageNormalizer.normalizePayload(payload, "target"))
+    }
+
+    @Test fun findsTheRequestedNoteBeyondAnEarlierUnrelatedCard() {
+        val payload = """{"cards":[{"noteId":"other","imageList":[{"url":"https://img.example/other.jpg"}]},{"noteId":"target","imageList":[{"url":"https://img.example/target.jpg"}]}]}"""
+        assertEquals("target", requireNotNull(XiaohongshuPageNormalizer.normalizePayload(payload, "target")).id)
+    }
+
+    @Test fun directUrlVideoAttachmentsRemainSeparateWithoutInventedIds() {
+        val payload = """{"noteId":"target","video":[{"masterUrl":"https://sns-video-qc.xhscdn.com/one.mp4"},{"masterUrl":"https://sns-video-qc.xhscdn.com/two.mp4"}]}"""
+        assertEquals(2, requireNotNull(XiaohongshuPageNormalizer.normalizePayload(payload)).media.size)
+    }
+
+    @Test fun recognizesAnExplicitVideoListWithoutASingularVideoField() {
+        val payload = """{"noteId":"target","videoList":[{"masterUrl":"https://sns-video-qc.xhscdn.com/one.mp4"},{"masterUrl":"https://sns-video-qc.xhscdn.com/two.mp4"}]}"""
+        assertEquals(2, requireNotNull(XiaohongshuPageNormalizer.normalizePayload(payload)).media.size)
+    }
+
+    @Test fun incompleteLivePhotoIsReportedEvenWhenItsStillImageCanBeRead() {
+        val payload = """{"noteId":"target","imageList":[{"url":"https://img.example/one.jpg","livePhoto":true,"stream":{}}]}"""
+        val data = requireNotNull(XiaohongshuPageNormalizer.normalizePayload(payload))
+        assertEquals(1, data.media.size)
+        assertEquals(1, data.expectedMediaCount)
+        assertEquals(1, data.unresolvedMediaCount)
+    }
+
+    @Test fun bitrateAlternativesDoNotBecomeExtraAttachments() {
+        val payload = """{"noteId":"target","video":{"media":{"stream":{"h264":[{"width":720,"height":1280,"masterUrl":"https://sns-video-qc.xhscdn.com/720.mp4"},{"width":1080,"height":1920,"masterUrl":"https://sns-video-qc.xhscdn.com/1080.mp4"}]}}}}"""
+        val data = requireNotNull(XiaohongshuPageNormalizer.normalizePayload(payload))
+        assertEquals(1, data.expectedMediaCount)
+        assertEquals(1, data.media.size)
+        assertEquals(2, data.media.single().variants.size)
+        assertEquals(0, data.unresolvedMediaCount)
+    }
+
+    @Test fun emptyVideoShellDoesNotHideAnExplicitListOrInventMissingMedia() {
+        val list = """{"noteId":"target","video":[],"videoList":[{"masterUrl":"https://sns-video-qc.xhscdn.com/one.mp4"}]}"""
+        assertEquals(MediaType.VIDEO, requireNotNull(XiaohongshuPageNormalizer.normalizePayload(list)).media.single().type)
+        val image = """{"noteId":"target","video":{},"imageList":[{"url":"https://img.example/one.jpg"}]}"""
+        assertEquals(0, requireNotNull(XiaohongshuPageNormalizer.normalizePayload(image)).unresolvedMediaCount)
+    }
+
+    @Test
+    fun retainsEachLivePhotoClipAlongsideTheNotesSlideshowVideo() {
+        val payload = """{"noteId":"6ad0d56a000000001803ba07","imageList":[
+            {"fileId":"still","url":"https://sns-webpic-qc.xhscdn.com/still.jpg"},
+            {"fileId":"live-one","url":"https://sns-webpic-qc.xhscdn.com/one.jpg","livePhoto":true,
+             "stream":{"h264":[{"width":1080,"height":1440,"masterUrl":"http://sns-video-v6.xhscdn.com/one.mp4","backupUrls":["http://sns-bak-v1.xhscdn.com/one.mp4"]}]}},
+            {"fileId":"live-two","url":"https://sns-webpic-qc.xhscdn.com/two.jpg","livePhoto":true,
+             "stream":{"h264":[{"width":1080,"height":1440,"masterUrl":"http://sns-video-v6.xhscdn.com/two.mp4"}]}}
+        ],"video":{"media":{"stream":{"h264":[{"masterUrl":"https://sns-video-qc.xhscdn.com/slideshow.mp4"}]}}}}"""
+
+        val media = requireNotNull(XiaohongshuPageNormalizer.normalizePayload(payload)).media
+
+        assertEquals(listOf(MediaType.VIDEO, MediaType.IMAGE, MediaType.LIVE_PHOTO, MediaType.LIVE_PHOTO), media.map { it.type })
+        val first = media[2]
+        assertEquals("https://sns-video-v6.xhscdn.com/one.mp4", first.url)
+        assertEquals(listOf("https://sns-bak-v1.xhscdn.com/one.mp4"), first.fallbackUrls)
+        assertEquals("https://ci.xiaohongshu.com/live-one", first.coverUrl)
+        assertEquals("https://sns-webpic-qc.xhscdn.com/one.jpg", first.thumbnailUrl)
+        assertEquals(1080, first.variants.first().width)
+        assertEquals(1440, first.variants.first().height)
+        assertEquals(listOf(2, 3), media.filter { it.type == MediaType.LIVE_PHOTO }.map { it.ordinal })
+        assertEquals(4, media.map { it.stableId }.distinct().size)
+    }
+
+    @Test
+    fun livePhotoWithNoPlayableStreamStillRetainsItsImage() {
+        val payload = """{"noteId":"live-no-stream","imageList":[
+            {"fileId":"still","url":"https://sns-webpic-qc.xhscdn.com/still.jpg","livePhoto":true,"stream":{}}
+        ]}"""
+        val media = requireNotNull(XiaohongshuPageNormalizer.normalizePayload(payload)).media.single()
+        assertEquals(MediaType.IMAGE, media.type)
+        assertEquals("https://ci.xiaohongshu.com/still", media.url)
+    }
+
+    @Test
+    fun singleLivePhotoIsNotDiscardedAsTheVideoPoster() {
+        val payload = """{"noteId":"single-live","imageList":[
+            {"fileId":"live","url":"https://sns-webpic-qc.xhscdn.com/live.jpg","livePhoto":true,
+             "stream":{"h264":[{"masterUrl":"https://sns-video-v6.xhscdn.com/live.mp4"}]}}
+        ],"video":{"masterUrl":"https://sns-video-v6.xhscdn.com/slideshow.mp4"}}"""
+        val media = requireNotNull(XiaohongshuPageNormalizer.normalizePayload(payload)).media
+        assertEquals(listOf(MediaType.VIDEO, MediaType.LIVE_PHOTO), media.map { it.type })
+    }
+
     @Test
     fun webViewJsonPayloadParsesWithoutHtmlScriptTags() {
         val payload = """{"noteId":"5f29440a0000000001005014","title":"Tail video","user":{"userId":"author","nickName":"Creator"},"imageList":[{"url":"https://sns-webpic-qc.xhscdn.com/cover.jpg"}],"video":{"media":{"stream":{"h264":[{"masterUrl":"https://sns-video-qc.xhscdn.com/video.mp4"}]}}}}"""

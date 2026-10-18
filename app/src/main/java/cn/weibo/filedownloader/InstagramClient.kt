@@ -129,6 +129,7 @@ internal object InstagramPostNormalizer {
             selectedVariantKey = selected.key,
             originalWidth = raw.optInt("original_width"),
             originalHeight = raw.optInt("original_height"),
+            sourceId = raw.optString("pk").ifBlank { raw.optString("id") },
         )
     }
 

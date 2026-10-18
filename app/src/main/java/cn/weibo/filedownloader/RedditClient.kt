@@ -108,7 +108,8 @@ internal object RedditPostNormalizer {
                 val type = if (animated && URI(url).path.orEmpty().endsWith(".mp4")) MediaType.VIDEO else MediaType.IMAGE
                 val variant = MediaVariant("original", url, source.optInt("x"), source.optInt("y"))
                 add(MediaItem(type, url, MediaQuality.ORIGINAL_BEST, postId, size + 1,
-                    variants = listOf(variant), selectedVariantKey = variant.key))
+                    variants = listOf(variant), selectedVariantKey = variant.key,
+                    sourceId = gallery.optJSONObject(index)?.optString("media_id").orEmpty()))
             }
             return@buildList
         }

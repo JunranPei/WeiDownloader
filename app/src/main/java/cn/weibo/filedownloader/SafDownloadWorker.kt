@@ -26,50 +26,84 @@ class SafDownloadWorker(
 ) : Worker(appContext, params) {
     override fun doWork(): Result {
         val statusWorkId = inputData.getString(KEY_STATUS_WORK_ID) ?: id.toString()
-        val sourceUrl = inputData.getString(KEY_URL) ?: return terminalFailure(statusWorkId)
-        val treeUri = inputData.getString(KEY_TREE_URI)?.takeIf { it.isNotBlank() }?.let(Uri::parse)
+        val treeUri = inputData.getString(KEY_TREE_URI)?.takeIf(String::isNotBlank)?.let(Uri::parse)
         val folderName = inputData.getString(KEY_FOLDER) ?: return terminalFailure(statusWorkId)
         val fileName = inputData.getString(KEY_FILE_NAME) ?: return terminalFailure(statusWorkId)
         val mediaType = inputData.getString(KEY_MEDIA_TYPE).orEmpty()
-        val cookie = inputData.getString(KEY_COOKIE).orEmpty()
-        val audioUrl = inputData.getString(KEY_AUDIO_URL).orEmpty()
         val referer = inputData.getString(KEY_REFERER).orEmpty()
-        val fallbackUrls = inputData.getStringArray(KEY_FALLBACK_URLS).orEmpty()
-            .filter { it.isNotBlank() && it != sourceUrl }
-        val candidates = (listOf(sourceUrl) + fallbackUrls).distinct()
-        val effectiveCookie = if (inputData.getString(KEY_PLATFORM) == Platform.XIAOHONGSHU.key) {
-            XiaohongshuSession.cookieHeader().ifBlank { cookie }
-        } else cookie
-
-        var lastError: IOException? = null
-        candidates.forEachIndexed { index, candidate ->
-            var destination: DownloadDestination? = null
-            try {
-                destination = createDestination(treeUri, folderName, fileName, mediaType)
-                if (audioUrl.isNotBlank()) {
-                    downloadDash(candidate, audioUrl, effectiveCookie, referer, destination, statusWorkId)
-                } else {
-                    download(candidate, effectiveCookie, referer, destination, statusWorkId)
-                }
-                destination.commit()
-                DownloadStatusStore(applicationContext).completeWorker(statusWorkId)
-                return Result.success()
-            } catch (error: IOException) {
-                destination?.discard()
-                lastError = error
-                Log.w(TAG, "source failed attempt=${index + 1}/${candidates.size} host=${hostOf(candidate)} reason=${error.message}")
-            } catch (error: SecurityException) {
-                destination?.discard()
-                Log.e(TAG, "destination denied file=$fileName", error)
-                return terminalFailure(statusWorkId)
-            } catch (error: Exception) {
-                destination?.discard()
-                Log.e(TAG, "download failed file=$fileName", error)
-                return terminalFailure(statusWorkId)
-            }
+        val encoded = inputData.getString(KEY_LOCATOR)
+        val legacy = inputData.getString(KEY_URL)?.let { source ->
+            val type = MediaType.entries.firstOrNull { it.name == mediaType } ?: return terminalFailure(statusWorkId)
+            MediaItem(type, source, "", "", 1,
+                audioUrl = inputData.getString(KEY_AUDIO_URL).orEmpty(),
+                fallbackUrls = inputData.getStringArray(KEY_FALLBACK_URLS).orEmpty().toList())
         }
-        lastError?.let { Log.e(TAG, "all download sources failed file=$fileName", it) }
-        return if (runAttemptCount < MAX_RETRIES) Result.retry() else terminalFailure(statusWorkId)
+        val locator = try { encoded?.let(DownloadLocator::decode)
+            ?: legacy?.let { DownloadStatusStore(applicationContext).legacyLocator(statusWorkId, it) }
+        } catch (error: Exception) {
+            Log.e(TAG, "Invalid durable download intent", error)
+            return terminalFailure(statusWorkId)
+        }
+        if (locator != null && (inputData.getString(KEY_PLATFORM)?.let { locator.platform.key != it } == true ||
+                (if (locator.cover) MediaType.IMAGE else locator.type).name != mediaType)) {
+            return terminalFailure(statusWorkId)
+        }
+        val platform = locator?.platform ?: Platform.entries.firstOrNull { it.key == inputData.getString(KEY_PLATFORM) }
+        fun transfer(media: MediaItem) {
+            val candidates = (listOf(media.url) + media.fallbackUrls).filter(String::isNotBlank).distinct()
+            var lastError: IOException? = null
+            candidates.forEachIndexed { index, candidate ->
+                if (isStopped) throw IOException("Download stopped")
+                var destination: DownloadDestination? = null
+                try {
+                    val cookie = if (locator != null && platform != null) BackgroundPostResolver.cookie(platform, candidate)
+                        else if (platform == Platform.XIAOHONGSHU) XiaohongshuSession.cookieHeader()
+                            .ifBlank { inputData.getString(KEY_COOKIE).orEmpty() }
+                        else inputData.getString(KEY_COOKIE).orEmpty()
+                    destination = createDestination(treeUri, folderName, fileName, mediaType)
+                    if (media.audioUrl.isNotBlank()) {
+                        downloadDash(candidate, media.audioUrl, cookie, referer, destination, statusWorkId)
+                    } else download(candidate, cookie, referer, destination, statusWorkId)
+                    destination.commit()
+                    return
+                } catch (error: IOException) {
+                    destination?.discard()
+                    lastError = error
+                    Log.w(TAG, "Source failed attempt=${index + 1}/${candidates.size} host=${hostOf(candidate)} reason=${error.message}")
+                } catch (error: Exception) {
+                    destination?.discard()
+                    throw error
+                }
+            }
+            throw lastError ?: IOException("No usable delivery source")
+        }
+        try {
+            if (locator != null) {
+                DownloadRenewal.execute(runAttemptCount > 0,
+                    resolve = { force ->
+                        if (isStopped) throw IOException("Download stopped")
+                        Log.d(TAG, "Renewing ${locator.platform.key} post=${locator.postId} force=$force")
+                        BackgroundPostResolver.resolve(applicationContext, locator, force)
+                    }, transfer = ::transfer)
+            } else {
+                // Preserve old WorkManager jobs. They predate durable locators.
+                transfer(legacy ?: return terminalFailure(statusWorkId))
+            }
+            DownloadStatusStore(applicationContext).completeWorker(statusWorkId)
+            return Result.success()
+        } catch (error: DownloadIdentityException) {
+            Log.e(TAG, "Refusing a different attachment or quality file=$fileName", error)
+            return terminalFailure(statusWorkId)
+        } catch (error: IOException) {
+            Log.w(TAG, "Download attempt failed file=$fileName", error)
+            return if (!isStopped && runAttemptCount < MAX_RETRIES) Result.retry() else terminalFailure(statusWorkId)
+        } catch (error: InterruptedException) {
+            Thread.currentThread().interrupt()
+            return Result.retry()
+        } catch (error: Exception) {
+            Log.e(TAG, "Download failed file=$fileName", error)
+            return terminalFailure(statusWorkId)
+        }
     }
 
     private fun createDestination(
@@ -110,8 +144,10 @@ class SafDownloadWorker(
                     ?: throw IOException("Cannot open selected destination")
             },
             commitAction = {
-                folder.findFile(fileName)?.delete()
-                if (!target.renameTo(fileName)) throw IOException("Cannot finalize selected destination")
+                synchronized(DownloadFileNames) {
+                    val name = DownloadFileNames.available(fileName) { folder.findFile(it) != null }
+                    if (!target.renameTo(name)) throw IOException("Cannot finalize selected destination")
+                }
             },
             discardAction = { target.delete() },
         )
@@ -153,10 +189,16 @@ class SafDownloadWorker(
         val root = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
         val folder = File(root, folderName)
         if (!folder.exists() && !folder.mkdirs()) throw IOException("Cannot create download folder")
-        val target = File(folder, fileName)
+        val temporary = File.createTempFile("download-", ".part", folder)
         return DownloadDestination(
-            openOutput = { FileOutputStream(target, false) },
-            discardAction = { target.delete() },
+            openOutput = { FileOutputStream(temporary, false) },
+            commitAction = {
+                synchronized(DownloadFileNames) {
+                    val name = DownloadFileNames.available(fileName) { File(folder, it).exists() }
+                    if (!temporary.renameTo(File(folder, name))) throw IOException("Cannot finalize download")
+                }
+            },
+            discardAction = { temporary.delete() },
         )
     }
 
@@ -173,6 +215,7 @@ class SafDownloadWorker(
         statusWorkId: String,
         progressOffset: Long = 0L,
         moreTracks: Boolean = false,
+        expectedType: MediaType? = MediaType.entries.firstOrNull { it.name == inputData.getString(KEY_MEDIA_TYPE) },
     ): Long {
         val weiboRequest = inputData.getString(KEY_PLATFORM) == Platform.WEIBO.key ||
             inputData.getString(KEY_PLATFORM) == null && referer == REFERER
@@ -198,6 +241,9 @@ class SafDownloadWorker(
             val contentType = connection.contentType.orEmpty()
             if (DownloadResponseValidator.isErrorContentType(contentType)) {
                 throw DownloadSourceException("unexpected content type $contentType")
+            }
+            if (DownloadResponseValidator.isWrongMediaType(contentType, expectedType)) {
+                throw DownloadSourceException("response media type $contentType does not match $expectedType")
             }
             if (redditRequest && contentType.isNotBlank() && contentType.contains("html", true)) {
                 throw DownloadSourceException("Reddit returned a page instead of media")
@@ -230,6 +276,9 @@ class SafDownloadWorker(
                             lastReportedAt = now
                         }
                     }
+                    if (DownloadResponseValidator.isTruncated(connection.contentLengthLong, downloadedBytes - progressOffset)) {
+                        throw DownloadSourceException("incomplete media response")
+                    }
                     statusStore.updateWorkerTaskProgress(statusWorkId, downloadedBytes, totalBytes)
                     return downloadedBytes
                 }
@@ -256,10 +305,10 @@ class SafDownloadWorker(
             val merged = temporaryFile(".mp4")
             val videoBytes = download(videoUrl, cookie, referer,
                 DownloadDestination(openOutput = { FileOutputStream(video) }), statusWorkId,
-                moreTracks = true)
+                moreTracks = true, expectedType = MediaType.VIDEO)
             download(audioUrl, cookie, referer,
                 DownloadDestination(openOutput = { FileOutputStream(audio) }), statusWorkId,
-                progressOffset = videoBytes)
+                progressOffset = videoBytes, expectedType = MediaType.AUDIO)
             DashMediaMuxer.mux(video, audio, merged) { isStopped }
             merged.inputStream().use { input ->
                 destination.openOutput().use { output ->
@@ -300,6 +349,7 @@ class SafDownloadWorker(
 
     companion object {
         private const val TAG = "SafDownloadWorker"
+        const val KEY_LOCATOR = "locator_v1"
         const val KEY_URL = "url"
         const val KEY_FALLBACK_URLS = "fallback_urls"
         const val KEY_AUDIO_URL = "audio_url"

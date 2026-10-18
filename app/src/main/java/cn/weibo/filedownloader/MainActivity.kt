@@ -60,6 +60,7 @@ class MainActivity : ComponentActivity() {
     private lateinit var downloadTasksPage: DownloadTasksPageController
     private lateinit var pasteButton: MaterialButton
     private lateinit var parseButton: MaterialButton
+    private var activeResolution: ResolutionRequest? = null
     private lateinit var selectAllButton: MaterialButton
     private lateinit var downloadButton: MaterialButton
     private lateinit var linkInput: EditText
@@ -215,6 +216,7 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
+        activeResolution?.cancel()
         douyinClient?.close()
         executor.shutdownNow()
         super.onDestroy()
@@ -330,6 +332,7 @@ class MainActivity : ComponentActivity() {
 
     private fun switchPlatform(value: Platform) {
         if (platform == value) return
+        activeResolution?.cancel()
         platform = value
         douyinClient?.close()
         douyinClient = null
@@ -340,6 +343,7 @@ class MainActivity : ComponentActivity() {
         summaryText.visibility = View.GONE
         linkInput.text?.clear()
         updatePlatformUi()
+        busy(false, "")
     }
 
     private fun nextPlatform(): Platform {
@@ -575,6 +579,10 @@ class MainActivity : ComponentActivity() {
             linkInput.setSelection(url.length)
         }
         refreshSession()
+        activeResolution?.cancel()
+        val run = ResolutionRequest().also { activeResolution = it }
+        val requestedPlatform = platform
+        val requestedCookie = sessionCookie
         post = null
         selectedUrls.clear()
         clearMediaPresentation()
@@ -599,6 +607,7 @@ class MainActivity : ComponentActivity() {
             douyinClient = DouyinClient(this)
             douyinClient?.loadPost(url, QualityPreference.HIGHEST) { result ->
                 runOnUiThread {
+                    if (!run.finish()) return@runOnUiThread
                     douyinClient?.close()
                     douyinClient = null
                     result.fold(
@@ -610,11 +619,12 @@ class MainActivity : ComponentActivity() {
             return
         }
         executor.execute {
+            if (!run.isActive()) return@execute
             try {
                 val includeLiveCover = preferences.getBoolean("live_cover", false)
-                val loaded = when (platform) {
+                val loaded = when (requestedPlatform) {
                     Platform.WEIBO -> WeiboClient(this, includeLiveCover).loadPost(url)
-                    Platform.BILIBILI -> BilibiliClient(sessionCookie, this).loadPost(url)
+                    Platform.BILIBILI -> BilibiliClient(requestedCookie, this).loadPost(url)
                     Platform.TELEGRAM -> TelegramClient(this).loadPost(url)
                     Platform.X -> XClient(this).loadPost(url)
                     Platform.INSTAGRAM -> InstagramClient(this).loadPost(url)
@@ -622,15 +632,16 @@ class MainActivity : ComponentActivity() {
                     Platform.REDDIT -> RedditClient(this).loadPost(url)
                     Platform.DOUYIN -> return@execute
                 }
-                runOnUiThread { handleLoadedPost(loaded) }
+                runOnUiThread { if (run.finish()) handleLoadedPost(loaded) }
             } catch (error: WeiboLoginRequiredException) {
                 runOnUiThread {
+                    if (!run.finish()) return@runOnUiThread
                     busy(false, error.message ?: getString(R.string.login_required_settings))
                     toast(getString(R.string.login_required_settings))
                     startActivity(Intent(this, SettingsActivity::class.java).putExtra(SettingsActivity.EXTRA_PLATFORM, platform.key))
                 }
             } catch (error: Exception) {
-                runOnUiThread { handleReadFailure(error) }
+                runOnUiThread { if (run.finish()) handleReadFailure(error) }
             }
         }
     }
@@ -659,6 +670,7 @@ class MainActivity : ComponentActivity() {
     private fun openDownloadWork(work: ActiveDownloadWork) {
         val url = work.sourceUrl
         if (url.isBlank()) return
+        activeResolution?.cancel()
         douyinClient?.close()
         douyinClient = null
         platform = work.platform
