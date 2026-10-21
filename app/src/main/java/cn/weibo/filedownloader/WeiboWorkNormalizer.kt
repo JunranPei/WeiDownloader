@@ -3,6 +3,7 @@ package cn.weibo.filedownloader
 import org.json.JSONArray
 import org.json.JSONObject
 import java.net.URL
+import java.net.URLEncoder
 
 internal data class WeiboWorkData(
     val id: String,
@@ -139,7 +140,52 @@ internal class WeiboWorkNormalizer(
         val ids = status.optJSONArray("pic_ids")
         if (ids != null) for (index in 0 until ids.length()) ids.optString(index).takeIf { it.isNotBlank() }?.let(orderedIds::add)
         infos.keys().forEach { if (it !in orderedIds) orderedIds += it }
-        orderedIds.forEach { id -> infos.optJSONObject(id)?.let { parsePicture(it, quality, postId, result, seen) } }
+        val liveHints = liveVideoHints(status)
+        orderedIds.forEachIndexed { index, id ->
+            infos.optJSONObject(id)?.let { picture ->
+                val hint = liveHints[index]
+                if (hint.isNullOrBlank() || chooseLiveVideo(picture) != null) {
+                    parsePicture(picture, quality, postId, result, seen)
+                } else {
+                    // Some mobile responses move the Live Photo clip out of
+                    // pic_infos and expose it as pic_video/live_photo on the
+                    // status object. Attach that hint to its matching picture
+                    // before applying the normal picture parser.
+                    val enriched = JSONObject(picture.toString())
+                        .put("type", "livephoto")
+                        .put("video", livePhotoPlaybackUrl(hint))
+                    parsePicture(enriched, quality, postId, result, seen)
+                }
+            }
+        }
+    }
+
+    /** Returns live-video hints keyed by their picture index. */
+    private fun liveVideoHints(status: JSONObject): Map<Int, String> {
+        val result = linkedMapOf<Int, String>()
+        val indexed = status.optString("pic_video").trim()
+        if (indexed.isNotBlank()) {
+            indexed.split(',').forEach { entry ->
+                val separator = entry.indexOf(':')
+                if (separator <= 0) return@forEach
+                val index = entry.substring(0, separator).trim().toIntOrNull() ?: return@forEach
+                val value = entry.substring(separator + 1).trim()
+                if (value.isNotBlank()) result[index] = value
+            }
+        }
+        val livePhotos = when (val value = status.opt("live_photo")) {
+            is JSONArray -> (0 until value.length()).mapNotNull { value.optString(it).trim().takeIf(String::isNotBlank) }
+            is String -> value.trim().takeIf(String::isNotBlank)?.let(::listOf).orEmpty()
+            else -> emptyList()
+        }
+        if (livePhotos.isNotEmpty() && result.isEmpty()) {
+            var next = 0
+            livePhotos.forEach { value ->
+                while (result.containsKey(next)) next++
+                result.putIfAbsent(next++, value)
+            }
+        }
+        return result
     }
 
     private fun parsePics(
@@ -671,10 +717,22 @@ internal class WeiboWorkNormalizer(
         if (picture.optString("type").equals("livephoto", true)) {
             picture.optString("fid").takeIf { it.isNotBlank() }?.let { fid ->
                 val cleanFid = fid.removeSuffix(".mov")
-                return "https://video.weibo.com/media/play?livephoto=//us.sinaimg.cn/$cleanFid.mov&KID=unistore,videomovSrc"
+                return livePhotoPlaybackUrl(cleanFid)
             }
         }
         return null
+    }
+
+    /** Builds the current Weibo Live Photo playback endpoint from a fid or source URL. */
+    private fun livePhotoPlaybackUrl(value: String): String {
+        val normalized = normalizeUrl(value)
+        if (normalized?.contains("video.weibo.com/media/play", ignoreCase = true) == true) return normalized
+        val source = if (normalized != null && normalized.endsWith(".mov", ignoreCase = true)) {
+            normalized
+        } else {
+            "https://livephoto.us.sinaimg.cn/${value.trim().removePrefix("/").removeSuffix(".mov")}.mov"
+        }
+        return "https://video.weibo.com/media/play?livephoto=${URLEncoder.encode(source, "UTF-8")}"
     }
 
     private fun thumbnailFrom(data: JSONObject, depth: Int = 0): String {

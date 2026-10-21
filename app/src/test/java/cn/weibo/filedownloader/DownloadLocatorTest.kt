@@ -97,4 +97,19 @@ class DownloadLocatorTest {
             MediaVariant("masterUrl", "https://cdn.example/264.mp4?new", 1080, 1920, codec = "h264")))
         assertEquals("https://cdn.example/264.mp4?new", locator(original).select(post(fresh)).url)
     }
+
+    @Test fun weiboLivePhotoPlaybackUrlsRemainDistinctAcrossRenewal() {
+        fun live(fid: String, ordinal: Int) = MediaItem(
+            MediaType.LIVE_PHOTO,
+            "https://video.weibo.com/media/play?livephoto=https%3A%2F%2Flivephoto.us.sinaimg.cn%2F$fid.mov",
+            MediaQuality.LIVE_ORIGINAL,
+            "post",
+            ordinal,
+        )
+        val first = live("first", 1)
+        val second = live("second", 2)
+        val target = DownloadLocator.create(Platform.WEIBO, post(first, second), second, false)
+        val fresh = second.copy(url = second.url)
+        assertEquals(fresh.url, target.select(post(first, fresh)).url)
+    }
 }

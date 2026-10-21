@@ -90,15 +90,28 @@ internal object MediaSourceIdentity {
         urls.mapNotNull(::resourceKey).forEach(::add)
     }
 
-    private fun resourceKey(value: String): String? = runCatching {
-        val uri = URI(value)
-        if (uri.scheme !in setOf("http", "https")) return@runCatching null
-        val query = uri.rawQuery.orEmpty().split('&').associate { it.substringBefore('=') to it.substringAfter('=', "") }
-        if (uri.path.orEmpty().contains("/aweme/v1/play")) {
-            query["video_id"]?.takeIf(String::isNotBlank)?.let { return@runCatching "video:$it" }
+    private fun resourceKey(value: String): String? {
+        return try {
+            val uri = URI(value)
+            if (uri.scheme !in setOf("http", "https")) return null
+            val query = uri.rawQuery.orEmpty().split('&')
+                .associate { it.substringBefore('=') to it.substringAfter('=', "") }
+            if (uri.path.orEmpty().contains("/aweme/v1/play")) {
+                query["video_id"]?.takeIf(String::isNotBlank)?.let { return "video:$it" }
+            }
+            val path = uri.rawPath?.takeIf { it.isNotBlank() && it != "/" }?.substringBefore('!')
+            if (path == null) return null
+            // Every Weibo Live Photo is served through the same /media/play
+            // path. Include its livephoto query value so multiple clips in one
+            // post remain distinct when a durable download is renewed.
+            if (path.endsWith("/media/play")) {
+                query["livephoto"]?.takeIf { it.isNotBlank() }?.let { return "livephoto:$it" }
+            }
+            "path:$path"
+        } catch (_: Exception) {
+            null
         }
-        uri.rawPath?.takeIf { it.isNotBlank() && it != "/" }?.substringBefore('!')?.let { "path:$it" }
-    }.getOrNull()
+    }
 
     fun codec(key: String): String = when {
         key.contains("265", true) || key.contains("hevc", true) -> "h265"

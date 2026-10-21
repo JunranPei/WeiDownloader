@@ -73,6 +73,28 @@ class WeiboWorkNormalizerTest {
     }
 
     @Test
+    fun readsTopLevelPicVideoHintsUsedByMobileLivePhotoResponses() {
+        val status = JSONObject(
+            """
+            {
+              "id": "live-post",
+              "pic_ids": ["pic-1", "pic-2"],
+              "pic_video": "1:second-live-fid",
+              "pic_infos": {
+                "pic-1": {"large": {"url": "https://wx1.sinaimg.cn/large/one.jpg"}},
+                "pic-2": {"large": {"url": "https://wx1.sinaimg.cn/large/two.jpg"}}
+              }
+            }
+            """.trimIndent(),
+        )
+
+        val media = normalizer().parseMedia(status, QualityPreference.HIGHEST, "live-post")
+
+        assertEquals(listOf(MediaType.IMAGE, MediaType.LIVE_PHOTO), media.map { it.type })
+        assertTrue(media[1].url.contains("second-live-fid.mov"))
+    }
+
+    @Test
     fun ranksPlaybackListByActualVideoSpecification() {
         val status = JSONObject(
             """
