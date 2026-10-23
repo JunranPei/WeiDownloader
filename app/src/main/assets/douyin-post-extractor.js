@@ -22,8 +22,36 @@
     }
     Object.keys(value).forEach(key => walk(value[key]));
   };
+  const walkFlight = frames => {
+    if (!Array.isArray(frames)) return;
+    for (const frame of frames) {
+      if (!Array.isArray(frame) || frame[0] !== 1 || typeof frame[1] !== 'string') continue;
+      for (const row of frame[1].split('\n')) {
+        const separator = row.indexOf(':');
+        if (separator < 0) continue;
+        try { walk(JSON.parse(row.slice(separator + 1))); } catch (_) {}
+      }
+    }
+  };
   walk(window._ROUTER_DATA);
   walk(window.__INITIAL_STATE__);
+  walk(window.__weiDouyinDetails);
+  walkFlight(window.__pace_f);
+  if (details.length === 0) {
+    const scannedScripts = window.__weiDouyinFlightScannedScripts ||
+      (window.__weiDouyinFlightScannedScripts = new WeakSet());
+    for (const node of document.querySelectorAll('script')) {
+      if (scannedScripts.has(node)) continue;
+      scannedScripts.add(node);
+      const source = node.textContent || '';
+      if (!source.includes('self.__pace_f.push([1,') || !source.includes(id) ||
+          !source.includes('aweme') || !source.includes('images')) continue;
+      const match = source.match(/self\.__pace_f\.push\(\[1,\s*("(?:\\.|[^"\\])*")\]\)/);
+      if (!match) continue;
+      try { walkFlight([[1, JSON.parse(match[1])]]); } catch (_) {}
+      if (details.length > 0) break;
+    }
+  }
 
   let article = null;
   for (const node of document.querySelectorAll("script[type='application/ld+json']")) {

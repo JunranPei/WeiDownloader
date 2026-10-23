@@ -20,6 +20,8 @@ object DouyinSession {
             .joinToString("; ")
     }
 
+    fun cookieHeader(address: String): String = CookieManager.getInstance().getCookie(address).orEmpty()
+
     fun isSignedIn(): Boolean = isSignedIn(cookieHeader())
 
     internal fun isSignedIn(cookieHeader: String): Boolean {

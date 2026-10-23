@@ -133,6 +133,8 @@ internal class DouyinWebDetailProvider(private val aid: String) : DouyinDetailPr
             setRequestProperty("Accept", "application/json,text/plain,*/*")
             setRequestProperty("Accept-Language", "zh-CN,zh;q=0.9")
             setRequestProperty("Referer", target.canonicalUrl)
+            DouyinSession.cookieHeader(DETAIL_ENDPOINT).takeIf(String::isNotBlank)
+                ?.let { setRequestProperty("Cookie", it) }
         }
         val body = try {
             BufferedInputStream(connection.inputStream).use { it.readBytes().toString(StandardCharsets.UTF_8) }

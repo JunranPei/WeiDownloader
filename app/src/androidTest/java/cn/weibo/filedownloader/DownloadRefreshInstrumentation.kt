@@ -2,6 +2,7 @@ package cn.weibo.filedownloader
 
 import android.app.Activity
 import android.app.Instrumentation
+import android.content.Intent
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -23,8 +24,10 @@ import kotlin.concurrent.thread
 /** On-device acceptance: real WorkManager, no Activity, durable locator, an expired local source. */
 class DownloadRefreshInstrumentation : Instrumentation() {
     private var scenario = "xhs-live"
+    private var options: Bundle? = null
     override fun onCreate(arguments: Bundle?) {
         super.onCreate(arguments)
+        options = arguments
         scenario = arguments?.getString("scenario") ?: scenario
         start()
     }
@@ -78,6 +81,41 @@ class DownloadRefreshInstrumentation : Instrumentation() {
             val post = requireNotNull(result).getOrThrow()
             check(post.id == "7697980119662749928" && post.media.isNotEmpty())
             sendStatus(0, Bundle().apply { putString("stream", "Headless browser parsed target=${post.id} media=${post.media.size}\n") })
+            return
+        }
+        if (scenario == "douyin-share-ui") {
+            val source = options?.getString("url") ?: "https://v.douyin.com/npve5sp-teE/"
+            val expectedId = options?.getString("expectedId") ?: "7699493946036397211"
+            val activity = startActivitySync(
+                Intent(Intent.ACTION_MAIN)
+                    .setClassName(app.packageName, MainActivity::class.java.name)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+            ) as MainActivity
+            runOnMainSync {
+                activity.findViewById<android.widget.EditText>(R.id.linkInput).setText(source)
+                activity.findViewById<android.view.View>(R.id.parseButton).performClick()
+            }
+            val postField = MainActivity::class.java.getDeclaredField("post").apply { isAccessible = true }
+            val summaryField = MainActivity::class.java.getDeclaredField("summaryText").apply { isAccessible = true }
+            val parseButtonField = MainActivity::class.java.getDeclaredField("parseButton").apply { isAccessible = true }
+            val deadline = SystemClock.elapsedRealtime() + 110_000
+            var post: WeiboPost? = null
+            var summary = ""
+            var finished = false
+            while (SystemClock.elapsedRealtime() < deadline) {
+                runOnMainSync {
+                    post = postField.get(activity) as? WeiboPost
+                    summary = (summaryField.get(activity) as? android.widget.TextView)?.text?.toString().orEmpty()
+                    finished = (parseButtonField.get(activity) as? android.view.View)?.isEnabled == true && summary.isNotBlank()
+                }
+                if (post != null || finished) break
+                Thread.sleep(400)
+            }
+            check(post?.id == expectedId && post?.media?.isNotEmpty() == true) {
+                "App UI did not resolve expected Douyin post; status=$summary"
+            }
+            sendStatus(0, Bundle().apply { putString("stream", "App UI resolved Douyin post=${post!!.id} media=${post!!.media.size}\n") })
+            runOnMainSync { activity.finish() }
             return
         }
         val douyin = scenario.startsWith("douyin")

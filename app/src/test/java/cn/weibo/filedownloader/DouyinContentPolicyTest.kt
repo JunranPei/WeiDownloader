@@ -20,6 +20,16 @@ class DouyinContentPolicyTest {
         assertTrue(DouyinLinkParser.extractUrl(copied) == "https://v.douyin.com/kSG3Qqi0fks/")
     }
 
+    @Test fun extractsTheProvidedSlidesShareLinkAndPostId() {
+        val copied = "4.66 一条有关于日出·小东西的视频 #表演 #话剧日出 " +
+            "https://v.douyin.com/npve5sp-teE/ 复制此链接，打开抖音搜索，直接观看视频！ :6pm 08/30 mdA:/ x@F.us"
+        assertEquals("https://v.douyin.com/npve5sp-teE/", DouyinLinkParser.extractUrl(copied))
+        assertEquals(
+            "7699493946036397211",
+            DouyinLinkParser.extractPostId("https://www.iesdouyin.com/share/slides/7699493946036397211/?is_slides=1"),
+        )
+    }
+
     @Test fun recognizesSlidesPostIdAfterShortLinkRedirect() {
         val redirected = "https://www.iesdouyin.com/share/slides/7674552954225867688/?is_slides=1"
         assertTrue(DouyinLinkParser.extractPostId(redirected) == "7674552954225867688")
@@ -110,6 +120,33 @@ class DouyinContentPolicyTest {
         assertEquals(MediaType.IMAGE, work?.media?.single()?.type)
         assertTrue(work?.media?.single()?.url.orEmpty().contains("work-preview.jpeg"))
         assertEquals("1088×1440", work?.media?.single()?.selectedVariantKey)
+    }
+
+    @Test fun normalizesSlidesDetailFromServerRenderedPageShape() {
+        val detail = JSONObject(
+            """
+            {
+              "awemeId": "7699493946036397211",
+              "desc": "slides post",
+              "images": [{
+                "width": 2160,
+                "height": 3018,
+                "uri": "tos-cn-i-0813/example",
+                "urlList": [
+                  "https://p3-pc-sign.douyinpic.com/tos-cn-i-0813/work~tplv-dy-aweme-images:q75.webp",
+                  "https://p3-pc-sign.douyinpic.com/tos-cn-i-0813/work~tplv-dy-aweme-images:q75.jpeg"
+                ]
+              }]
+            }
+            """.trimIndent(),
+        )
+
+        val work = DouyinWorkNormalizer.normalize(detail, "7699493946036397211")
+
+        assertEquals("slides post", work?.title)
+        assertEquals(1, work?.media?.size)
+        assertEquals(MediaType.IMAGE, work?.media?.single()?.type)
+        assertTrue(work?.media?.single()?.url.orEmpty().endsWith("q75.jpeg"))
     }
 
     @Test fun keepsCreatorIdentityAndAvatarFromDetailResponse() {

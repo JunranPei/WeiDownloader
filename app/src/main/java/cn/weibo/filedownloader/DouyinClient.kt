@@ -13,7 +13,10 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
+import android.webkit.RenderProcessGoneDetail
 import android.widget.FrameLayout
+import androidx.webkit.WebViewCompat
+import androidx.webkit.WebViewFeature
 import org.json.JSONArray
 import org.json.JSONTokener
 import org.json.JSONObject
@@ -87,7 +90,7 @@ class DouyinClient(private val context: Context) {
                             handler.post {
                                 if (!run.finish()) return@post
                                 if (fallback.isSuccess) callback(fallback)
-                                else callback(Result.failure(apiResult.exceptionOrNull() ?: webResult.exceptionOrNull() ?: fallback.exceptionOrNull() ?: DouyinException(context.getString(R.string.douyin_no_media))))
+                                else callback(Result.failure(DouyinException(context.getString(R.string.douyin_page_no_media))))
                             }
                         }
                     }
@@ -141,6 +144,7 @@ class DouyinClient(private val context: Context) {
             val activity = context as? Activity
             val root = activity?.findViewById<View>(R.id.rootLayout) as? FrameLayout
                 ?: activity?.window?.decorView?.findViewById<FrameLayout>(android.R.id.content)
+            val browserUrl = browserFallbackUrl(target)
             val view = WebView(context).apply {
                 setBackgroundColor(Color.TRANSPARENT)
                 alpha = 0.01f
@@ -148,9 +152,7 @@ class DouyinClient(private val context: Context) {
                 settings.javaScriptEnabled = true
                 settings.domStorageEnabled = true
                 settings.mediaPlaybackRequiresUserGesture = false
-                settings.userAgentString = if (URL(target.canonicalUrl).host.endsWith("iesdouyin.com")) {
-                    MOBILE_USER_AGENT
-                } else WEB_USER_AGENT
+                settings.userAgentString = WEB_USER_AGENT
                 webViewClient = object : WebViewClient() {
                     override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean =
                         request.url.scheme !in listOf("http", "https")
@@ -159,6 +161,15 @@ class DouyinClient(private val context: Context) {
                         if (request.isForMainFrame) {
                             Log.d("DouyinClient", "page load error=${error.errorCode} description=${error.description}")
                         }
+                    }
+
+                    override fun onRenderProcessGone(view: WebView, detail: RenderProcessGoneDetail): Boolean {
+                        Log.w("DouyinClient", "page renderer exited; crashed=${detail.didCrash()}")
+                        if (webView === view) webView = null
+                        (view.parent as? android.view.ViewGroup)?.removeView(view)
+                        runCatching { view.stopLoading(); view.destroy() }
+                        finishBrowser(Result.failure(DouyinException(context.getString(R.string.douyin_page_no_media))))
+                        return true
                     }
 
                     override fun onPageFinished(view: WebView, url: String) {
@@ -177,6 +188,13 @@ class DouyinClient(private val context: Context) {
                 webChromeClient = WebChromeClient()
             }
             webView = view
+            if (WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
+                WebViewCompat.addDocumentStartJavaScript(
+                    view,
+                    detailCaptureScript,
+                    setOf("https://www.douyin.com", "https://www.iesdouyin.com"),
+                )
+            }
             val params = FrameLayout.LayoutParams(
                 context.resources.displayMetrics.widthPixels,
                 context.resources.displayMetrics.heightPixels,
@@ -187,8 +205,20 @@ class DouyinClient(private val context: Context) {
             handler.postDelayed({
                 finishBrowser(Result.failure(DouyinException(context.getString(R.string.douyin_page_no_media))))
             }, BROWSER_TIMEOUT_MS)
-            view.loadUrl(target.canonicalUrl)
+            view.loadUrl(browserUrl)
         }
+    }
+
+    private fun browserFallbackUrl(target: DouyinResolvedLink): String {
+        val postId = target.primaryPostId
+        if (postId.isBlank()) return target.canonicalUrl
+        val path = runCatching { URL(target.canonicalUrl).path.lowercase() }.getOrDefault("")
+        val route = if (path.contains("/slides/") || path.contains("/note/") || path.contains("/gallery/")) {
+            "note"
+        } else {
+            "video"
+        }
+        return "https://www.douyin.com/$route/$postId"
     }
 
     private fun pollPage(
@@ -286,6 +316,8 @@ class DouyinClient(private val context: Context) {
                     setRequestProperty("User-Agent", SEO_USER_AGENT)
                     setRequestProperty("Accept-Language", "zh-CN,zh;q=0.9")
                     setRequestProperty("Referer", "https://www.douyin.com/")
+                    DouyinSession.cookieHeader(requestUrl).takeIf(String::isNotBlank)
+                        ?.let { setRequestProperty("Cookie", it) }
                 }
                 val body = try {
                     BufferedInputStream(connection.inputStream).use { input ->
@@ -396,6 +428,10 @@ class DouyinClient(private val context: Context) {
         context.assets.open("douyin-post-extractor.js").bufferedReader().use { it.readText() }
     }
 
+    private val detailCaptureScript by lazy {
+        context.assets.open("douyin-detail-capture.js").bufferedReader().use { it.readText() }
+    }
+
     private fun buildExtractScript(postId: String): String =
         extractionTemplate.replace("__POST_ID_JSON__", JSONObject.quote(postId))
 
@@ -403,7 +439,6 @@ class DouyinClient(private val context: Context) {
 
     private companion object {
         const val WEB_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
-        const val MOBILE_USER_AGENT = "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/130.0.0.0 Mobile Safari/537.36"
         const val SEO_USER_AGENT = "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)"
         const val DOWNLOAD_USER_AGENT = "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/126 Mobile Safari/537.36"
         val JSON_LD_REGEX = Regex("<script[^>]+type=[\\\"']application/ld\\+json[\\\"'][^>]*>(.*?)</script>", setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL))
