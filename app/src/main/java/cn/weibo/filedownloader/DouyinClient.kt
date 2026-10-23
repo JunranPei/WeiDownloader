@@ -309,8 +309,10 @@ class DouyinClient(private val context: Context) {
         var lastFailure: Exception? = null
         for (requestUrl in requestUrls) {
             val post = try {
-                val connection = (URL(requestUrl).openConnection() as HttpURLConnection).apply {
-                    instanceFollowRedirects = true
+                val connection = SafeHttpRedirects.openConnection(
+                    requestUrl,
+                    allowRedirect = { DouyinLinkParser.isSupportedShareUrl(it.toExternalForm()) },
+                ) {
                     connectTimeout = 20_000
                     readTimeout = 30_000
                     setRequestProperty("User-Agent", SEO_USER_AGENT)

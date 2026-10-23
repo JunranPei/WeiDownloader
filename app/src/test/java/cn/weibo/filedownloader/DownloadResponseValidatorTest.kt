@@ -37,4 +37,14 @@ class DownloadResponseValidatorTest {
         assertTrue(DownloadResponseValidator.isErrorBody(json, json.size))
         assertFalse(DownloadResponseValidator.isErrorBody(byteArrayOf(0xFF.toByte(), 0xD8.toByte(), 0xFF.toByte()), 3))
     }
+
+    @Test
+    fun rejectsPlainTextReturnedAsGenericBinaryButKeepsBinaryImageBytes() {
+        val error = "upstream temporarily unavailable".toByteArray()
+        val jpeg = byteArrayOf(0xFF.toByte(), 0xD8.toByte(), 0xFF.toByte(), 0xE0.toByte(), 0, 0x10, 0x4A, 0x46)
+
+        assertTrue(DownloadResponseValidator.isErrorBody(error, error.size, "application/octet-stream"))
+        assertTrue(DownloadResponseValidator.isErrorBody(error, error.size, "image/jpeg"))
+        assertFalse(DownloadResponseValidator.isErrorBody(jpeg, jpeg.size, "application/octet-stream"))
+    }
 }

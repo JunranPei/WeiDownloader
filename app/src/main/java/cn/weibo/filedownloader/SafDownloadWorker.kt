@@ -223,8 +223,7 @@ class SafDownloadWorker(
         val connection = if (weiboRequest) WeiboSession.openConnection(sourceUrl,
             headers = mapOf("Referer" to referer.ifBlank { REFERER }, "Accept-Encoding" to "identity"),
             connectTimeout = CONNECT_TIMEOUT_MS, readTimeout = READ_TIMEOUT_MS)
-        else (URL(sourceUrl).openConnection() as HttpURLConnection).apply {
-            instanceFollowRedirects = true
+        else SafeHttpRedirects.openConnection(sourceUrl) {
             connectTimeout = CONNECT_TIMEOUT_MS
             readTimeout = READ_TIMEOUT_MS
             // Bilibili DASH URLs must use the same desktop identity as the playurl request.
@@ -255,10 +254,17 @@ class SafDownloadWorker(
             statusStore.updateWorkerTaskProgress(statusWorkId, progressOffset, totalBytes)
             connection.inputStream.use { input ->
                 val buffer = ByteArray(BUFFER_SIZE)
-                val firstCount = input.read(buffer)
+                var firstCount = input.read(buffer)
                 if (firstCount <= 0) throw DownloadSourceException("empty response body")
-                if (DownloadResponseValidator.isErrorBody(buffer, firstCount)) {
-                    throw DownloadSourceException("response body is a web page or JSON error")
+                val sniffSize = minOf(buffer.size, 128)
+                while (firstCount < sniffSize) {
+                    val count = input.read(buffer, firstCount, sniffSize - firstCount)
+                    if (count <= 0) break
+                    firstCount += count
+                }
+                if (firstCount < 8) throw DownloadSourceException("response is too short to contain media data")
+                if (DownloadResponseValidator.isErrorBody(buffer, firstCount, contentType)) {
+                    throw DownloadSourceException("response body is text or a web page/JSON error")
                 }
                 destination.openOutput().use { output ->
                     output.write(buffer, 0, firstCount)

@@ -55,6 +55,14 @@ class DouyinContentPolicyTest {
         assertTrue(DouyinLinkParser.isSupportedShareUrl("https://v.douyin.com/example/"))
     }
 
+    @Test fun rejectsUnsafeSchemeCredentialsCustomPortsAndHostnameLookalikes() {
+        assertFalse(DouyinLinkParser.isSupportedShareUrl("ftp://v.douyin.com/share/"))
+        assertFalse(DouyinLinkParser.isSupportedShareUrl("https://name:secret@www.douyin.com/share/"))
+        assertFalse(DouyinLinkParser.isSupportedShareUrl("https://www.douyin.com:8443/share/"))
+        assertFalse(DouyinLinkParser.isSupportedShareUrl("https://www.douyin.com.evil.example/share/"))
+        assertTrue(DouyinLinkParser.isSupportedShareUrl("https://www.douyin.com:443/share/"))
+    }
+
     @Test fun rejectsTheGenericDouyinPromotionalVideo() {
         assertFalse(
             DouyinContentPolicy.isScopedVideoUrl(

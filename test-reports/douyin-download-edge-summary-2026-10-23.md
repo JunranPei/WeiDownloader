@@ -1,0 +1,9 @@
+# Douyin download edge-test summary (2026-10-23)
+
+Tested `D:\workplace\WeiDownloader` branch `codex/xiaohongshu-reddit`, starting from app `0.0.52` (`versionCode 10042`) and repeating the final worker/redirect probes on `0.0.53` (`versionCode 10043`), on API 36 emulator `emulator-5554` with WebView `148.0.7778.226`.
+
+The run found three defects. First, the Worker treated a readable text error returned as HTTP 200 `application/octet-stream` as a successful image. Second, automatic cross-origin redirects forwarded a manually supplied Cookie header. Third, the shared redirect helper did not validate its initial URL with the same strictness as redirect targets. The download validation now rejects readable error text before opening the output; the redirect handler bounds hops, rejects unsafe initial and redirected URLs, and removes origin-sensitive/custom headers when the destination origin changes.
+
+Repair evidence: the invalid-media Worker probe now ends `FAILED` with zero published or pending output rows; a seven-case response suite (403, 404, HTML/JSON, wrong MIME, empty, truncated, and plain-text binary) also reports `FAILED` with zero rows for every case; a controlled redirect probe no longer forwards its test Cookie; the supplied link resolves on 0.0.53 and the real Worker downloads a 309,429-byte JPEG with a valid signature before removing the test row; the post previously resolved to 19 media entries and forced WebView fallback also resolved. Unit tests report 211 tests with zero failures, and 15 media-extractor checks pass.
+
+The 0.0.53 release APK builds successfully. Destination create/open/write/finalize failures, a real OEM device, and a production off-origin redirect were not tested. See [the traceable matrix](douyin-download-edge-matrix-2026-10-23.md) for cases and source links.

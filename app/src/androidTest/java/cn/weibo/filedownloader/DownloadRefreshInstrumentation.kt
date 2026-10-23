@@ -2,11 +2,16 @@ package cn.weibo.filedownloader
 
 import android.app.Activity
 import android.app.Instrumentation
+import android.content.ContentResolver
+import android.content.ContentUris
 import android.content.Intent
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.os.SystemClock
+import android.provider.MediaStore
+import android.net.Uri
+import androidx.work.BackoffPolicy
 import androidx.work.Data
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkInfo
@@ -15,9 +20,11 @@ import org.json.JSONObject
 import java.io.File
 import java.net.ServerSocket
 import java.net.SocketTimeoutException
+import java.net.URL
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicReference
 import java.util.UUID
 import kotlin.concurrent.thread
 
@@ -68,19 +75,31 @@ class DownloadRefreshInstrumentation : Instrumentation() {
             val latch = CountDownLatch(1)
             var result: Result<WeiboPost>? = null
             var client: DouyinClient? = null
+            val source = options?.getString("url") ?: "https://v.douyin.com/mpsv0SfXFyw/"
+            val expectedId = options?.getString("expectedId") ?: "7697980119662749928"
+            val activity = startActivitySync(
+                Intent(Intent.ACTION_MAIN)
+                    .setClassName(app.packageName, MainActivity::class.java.name)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+            ) as MainActivity
             Handler(Looper.getMainLooper()).post {
-                client = DouyinClient(app)
-                // Test the actual headless browser fallback even when a native API happens to work.
+                client = DouyinClient(activity)
+                // Force the actual WebView fallback even when a native API happens to work.
                 DouyinClient::class.java.getDeclaredField("detailProviders").apply { isAccessible = true }
                     .set(client, emptyList<DouyinDetailProvider>())
-                client?.loadPost("https://v.douyin.com/mpsv0SfXFyw/", QualityPreference.HIGHEST) {
+                client?.loadPost(source, QualityPreference.HIGHEST) {
                     result = it; client?.close(); latch.countDown()
                 }
             }
-            check(latch.await(95, TimeUnit.SECONDS)) { "Headless browser timed out" }
-            val post = requireNotNull(result).getOrThrow()
-            check(post.id == "7697980119662749928" && post.media.isNotEmpty())
-            sendStatus(0, Bundle().apply { putString("stream", "Headless browser parsed target=${post.id} media=${post.media.size}\n") })
+            try {
+                check(latch.await(95, TimeUnit.SECONDS)) { "WebView fallback timed out" }
+                val post = requireNotNull(result).getOrThrow()
+                check(post.id == expectedId && post.media.isNotEmpty())
+                sendStatus(0, Bundle().apply { putString("stream", "WebView fallback parsed target=${post.id} media=${post.media.size}\n") })
+            } finally {
+                client?.close()
+                runOnMainSync { activity.finish() }
+            }
             return
         }
         if (scenario == "douyin-share-ui") {
@@ -116,6 +135,275 @@ class DownloadRefreshInstrumentation : Instrumentation() {
             }
             sendStatus(0, Bundle().apply { putString("stream", "App UI resolved Douyin post=${post!!.id} media=${post!!.media.size}\n") })
             runOnMainSync { activity.finish() }
+            return
+        }
+        if (scenario == "download-invalid-octet-stream" || scenario == "download-invalid-response-suite") {
+            data class InvalidResponse(
+                val name: String,
+                val status: Int,
+                val contentType: String,
+                val body: ByteArray,
+                val declaredLength: Int = body.size,
+            )
+            val contentResolver = app.contentResolver
+            val runId = UUID.randomUUID().toString().take(8)
+            val folder = "AllDownloader/EdgeTest-$runId"
+            val plainText = "not an image or media file".toByteArray()
+            val html = "<html>access denied</html>".toByteArray()
+            val json = "{\"error\":403}".toByteArray()
+            val jpegPrefix = byteArrayOf(0xFF.toByte(), 0xD8.toByte(), 0xFF.toByte(), 0xE0.toByte()) + ByteArray(28)
+            val cases = if (scenario == "download-invalid-octet-stream") {
+                listOf(InvalidResponse("octet-text", 200, "application/octet-stream", plainText))
+            } else {
+                listOf(
+                    InvalidResponse("http-403", 403, "text/plain", "forbidden".toByteArray()),
+                    InvalidResponse("http-404", 404, "text/html", html),
+                    InvalidResponse("json-error", 200, "application/json", json),
+                    InvalidResponse("wrong-mime", 200, "video/mp4", jpegPrefix),
+                    InvalidResponse("empty-body", 200, "application/octet-stream", byteArrayOf()),
+                    InvalidResponse("truncated-body", 200, "application/octet-stream", jpegPrefix, declaredLength = 128),
+                    InvalidResponse("octet-text", 200, "application/octet-stream", plainText),
+                )
+            }
+            val results = mutableListOf<String>()
+            for (testCase in cases) {
+                val fileName = "invalid-${testCase.name}-$runId.jpg"
+                val requests = AtomicInteger()
+                var serving = true
+                ServerSocket(0).use { server ->
+                    server.soTimeout = 1000
+                    val serverThread = thread(isDaemon = true) {
+                        while (serving) try {
+                            server.accept().use { socket ->
+                                socket.soTimeout = 2000
+                                val input = socket.getInputStream().bufferedReader()
+                                while (input.readLine()?.isNotEmpty() == true) { }
+                                requests.incrementAndGet()
+                                socket.getOutputStream().apply {
+                                    write(("HTTP/1.1 ${testCase.status} ${if (testCase.status in 200..299) "OK" else "Injected Failure"}\r\n" +
+                                        "Content-Type: ${testCase.contentType}\r\n" +
+                                        "Content-Length: ${testCase.declaredLength}\r\nConnection: close\r\n\r\n").toByteArray())
+                                    write(testCase.body)
+                                }
+                            }
+                        } catch (_: SocketTimeoutException) { } catch (_: Exception) { break }
+                    }
+                    try {
+                    val data = Data.Builder()
+                        .putString(SafDownloadWorker.KEY_URL, "http://127.0.0.1:${server.localPort}/invalid.jpg")
+                        .putString(SafDownloadWorker.KEY_PLATFORM, Platform.DOUYIN.key)
+                        .putString(SafDownloadWorker.KEY_FOLDER, folder)
+                        .putString(SafDownloadWorker.KEY_FILE_NAME, fileName)
+                        .putString(SafDownloadWorker.KEY_MEDIA_TYPE, MediaType.IMAGE.name)
+                        .putString(SafDownloadWorker.KEY_REFERER, "https://www.douyin.com/")
+                        .build()
+                    val request = OneTimeWorkRequestBuilder<SafDownloadWorker>()
+                        .setInputData(data)
+                        .setBackoffCriteria(BackoffPolicy.LINEAR, 1, TimeUnit.SECONDS)
+                        .build()
+                    val manager = WorkManager.getInstance(app)
+                    manager.enqueue(request).result.get(10, TimeUnit.SECONDS)
+                    val deadline = SystemClock.elapsedRealtime() + 150_000
+                    var state: WorkInfo.State? = null
+                    while (SystemClock.elapsedRealtime() < deadline) {
+                        state = manager.getWorkInfoById(request.id).get(3, TimeUnit.SECONDS)?.state
+                        if (state?.isFinished == true) break
+                        Thread.sleep(300)
+                    }
+                    var outputRows = 0
+                    val queryArgs = Bundle().apply {
+                        putInt(MediaStore.QUERY_ARG_MATCH_PENDING, MediaStore.MATCH_INCLUDE)
+                        putString(ContentResolver.QUERY_ARG_SQL_SELECTION, "${MediaStore.MediaColumns.DISPLAY_NAME}=?")
+                        putStringArray(ContentResolver.QUERY_ARG_SQL_SELECTION_ARGS, arrayOf(fileName))
+                    }
+                    contentResolver.query(
+                        MediaStore.Downloads.EXTERNAL_CONTENT_URI,
+                        arrayOf(MediaStore.MediaColumns._ID, MediaStore.MediaColumns.SIZE, MediaStore.MediaColumns.IS_PENDING),
+                        queryArgs,
+                        null,
+                    ).use { cursor ->
+                        outputRows = cursor?.count ?: 0
+                        while (cursor?.moveToNext() == true) {
+                            val id = cursor.getLong(cursor.getColumnIndexOrThrow(MediaStore.MediaColumns._ID))
+                            contentResolver.delete(ContentUris.withAppendedId(MediaStore.Downloads.EXTERNAL_CONTENT_URI, id), null, null)
+                        }
+                    }
+                    check(outputRows == 0) {
+                        "Worker left a published or pending MediaStore item; rows=$outputRows state=$state case=${testCase.name}"
+                    }
+                    check(state == WorkInfo.State.FAILED) { "Unexpected worker state for ${testCase.name}: $state" }
+                    results += "${testCase.name}=FAILED/rows:$outputRows/requests:${requests.get()}"
+                    } finally {
+                        serving = false
+                        server.close()
+                        serverThread.join(1500)
+                    }
+                }
+            }
+            sendStatus(0, Bundle().apply { putString("stream", "Invalid response suite: ${results.joinToString("; ")}\n") })
+            return
+        }
+        if (scenario == "redirect-cookie-probe") {
+            val redirectServer = ServerSocket(0)
+            val targetServer = ServerSocket(0)
+            val targetHeaders = AtomicReference("")
+            val targetReached = CountDownLatch(1)
+            val targetThread = thread(isDaemon = true) {
+                targetServer.accept().use { socket ->
+                    val lines = mutableListOf<String>()
+                    val input = socket.getInputStream().bufferedReader()
+                    while (true) {
+                        val line = input.readLine() ?: break
+                        if (line.isEmpty()) break
+                        lines += line
+                    }
+                    targetHeaders.set(lines.joinToString("\n"))
+                    targetReached.countDown()
+                    socket.getOutputStream().write(
+                        "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok".toByteArray(),
+                    )
+                }
+            }
+            val redirectThread = thread(isDaemon = true) {
+                redirectServer.accept().use { socket ->
+                    val input = socket.getInputStream().bufferedReader()
+                    while (input.readLine()?.isNotEmpty() == true) { }
+                    val location = "http://localhost:${targetServer.localPort}/target"
+                    socket.getOutputStream().write(
+                        "HTTP/1.1 302 Found\r\nLocation: $location\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".toByteArray(),
+                    )
+                }
+            }
+            try {
+                val connection = SafeHttpRedirects.openConnection(
+                    "http://127.0.0.1:${redirectServer.localPort}/start",
+                ) {
+                    connectTimeout = 5000
+                    readTimeout = 5000
+                    setRequestProperty("Cookie", "session=edge-test-only")
+                }
+                val status = connection.responseCode
+                connection.inputStream.use { it.readBytes() }
+                connection.disconnect()
+                check(status == 200 && targetReached.await(5, TimeUnit.SECONDS)) {
+                    "Controlled cross-host redirect did not reach target: status=$status"
+                }
+                val cookieForwarded = targetHeaders.get().lines().any {
+                    it.startsWith("Cookie:", ignoreCase = true) && it.contains("session=edge-test-only")
+                }
+                check(!cookieForwarded) { "Sensitive Cookie crossed origin during redirect" }
+                sendStatus(0, Bundle().apply {
+                    putString("stream", "Safe redirect followed cross-origin; test Cookie forwarded=$cookieForwarded\n")
+                })
+            } finally {
+                redirectServer.close()
+                targetServer.close()
+                redirectThread.join(1500)
+                targetThread.join(1500)
+            }
+            return
+        }
+        if (scenario == "douyin-slide-download") {
+            val source = options?.getString("url") ?: "https://v.douyin.com/npve5sp-teE/"
+            val expectedId = options?.getString("expectedId") ?: "7699493946036397211"
+            val contentResolver = app.contentResolver
+            val activity = startActivitySync(
+                Intent(Intent.ACTION_MAIN)
+                    .setClassName(app.packageName, MainActivity::class.java.name)
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+            ) as MainActivity
+            var publishedUri: Uri? = null
+            try {
+                runOnMainSync {
+                    activity.findViewById<android.widget.EditText>(R.id.linkInput).setText(source)
+                    activity.findViewById<android.view.View>(R.id.parseButton).performClick()
+                }
+                val postField = MainActivity::class.java.getDeclaredField("post").apply { isAccessible = true }
+                val deadline = SystemClock.elapsedRealtime() + 110_000
+                var post: WeiboPost? = null
+                while (SystemClock.elapsedRealtime() < deadline && post == null) {
+                    runOnMainSync { post = postField.get(activity) as? WeiboPost }
+                    if (post == null) Thread.sleep(400)
+                }
+                val resolved = requireNotNull(post) { "App UI did not resolve the test post" }
+                check(resolved.id == expectedId) { "Resolved unexpected post id=${resolved.id}" }
+                val image = resolved.media.firstOrNull { it.type == MediaType.IMAGE }
+                    ?: error("Resolved post has no image media")
+                val extension = image.url.substringBefore('?').substringAfterLast('.', "jpg")
+                    .lowercase().takeIf { it in setOf("jpg", "jpeg", "png", "webp", "avif") } ?: "jpg"
+                val runId = UUID.randomUUID().toString().take(8)
+                val folder = "AllDownloader/EdgeTest-$runId"
+                val fileName = "douyin-${resolved.id}-1.$extension"
+                contentResolver.query(
+                    MediaStore.Downloads.EXTERNAL_CONTENT_URI,
+                    arrayOf(MediaStore.MediaColumns._ID),
+                    "${MediaStore.MediaColumns.DISPLAY_NAME}=?",
+                    arrayOf(fileName),
+                    null,
+                ).use { check(it?.count == 0) { "Unique test filename already exists" } }
+                val data = Data.Builder()
+                    .putString(SafDownloadWorker.KEY_URL, image.url)
+                    .putString(SafDownloadWorker.KEY_PLATFORM, Platform.DOUYIN.key)
+                    .putString(SafDownloadWorker.KEY_FOLDER, folder)
+                    .putString(SafDownloadWorker.KEY_FILE_NAME, fileName)
+                    .putString(SafDownloadWorker.KEY_MEDIA_TYPE, MediaType.IMAGE.name)
+                    .putString(SafDownloadWorker.KEY_REFERER, "https://www.douyin.com/")
+                    .build()
+                    val request = OneTimeWorkRequestBuilder<SafDownloadWorker>()
+                        .setInputData(data)
+                        .setBackoffCriteria(BackoffPolicy.LINEAR, 1, TimeUnit.SECONDS)
+                        .build()
+                val manager = WorkManager.getInstance(app)
+                manager.enqueue(request).result.get(10, TimeUnit.SECONDS)
+                val workDeadline = SystemClock.elapsedRealtime() + 150_000
+                var state: WorkInfo.State? = null
+                while (SystemClock.elapsedRealtime() < workDeadline) {
+                    state = manager.getWorkInfoById(request.id).get(3, TimeUnit.SECONDS)?.state
+                    if (state?.isFinished == true) break
+                    Thread.sleep(300)
+                }
+                check(state == WorkInfo.State.SUCCEEDED) { "Slide image download failed: $state" }
+                contentResolver.query(
+                    MediaStore.Downloads.EXTERNAL_CONTENT_URI,
+                    arrayOf(
+                        MediaStore.MediaColumns._ID,
+                        MediaStore.MediaColumns.DISPLAY_NAME,
+                        MediaStore.MediaColumns.MIME_TYPE,
+                        MediaStore.MediaColumns.RELATIVE_PATH,
+                        MediaStore.MediaColumns.IS_PENDING,
+                        MediaStore.MediaColumns.SIZE,
+                    ),
+                    "${MediaStore.MediaColumns.DISPLAY_NAME}=?",
+                    arrayOf(fileName),
+                    null,
+                ).use { cursor ->
+                    check(cursor?.count == 1) { "Expected exactly one published test file" }
+                    check(cursor!!.moveToFirst())
+                    val id = cursor.getLong(cursor.getColumnIndexOrThrow(MediaStore.MediaColumns._ID))
+                    val mime = cursor.getString(cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.MIME_TYPE)).orEmpty()
+                    val relativePath = cursor.getString(cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.RELATIVE_PATH)).orEmpty()
+                    val pending = cursor.getInt(cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.IS_PENDING))
+                    val size = cursor.getLong(cursor.getColumnIndexOrThrow(MediaStore.MediaColumns.SIZE))
+                    publishedUri = ContentUris.withAppendedId(MediaStore.Downloads.EXTERNAL_CONTENT_URI, id)
+                    check(relativePath.endsWith("$folder/")) { "Unexpected output path: $relativePath" }
+                    check(pending == 0 && size > 0L) { "Published file is incomplete: pending=$pending size=$size" }
+                    val prefix = ByteArray(16)
+                    val count = contentResolver.openInputStream(publishedUri!!)?.use { it.read(prefix) } ?: -1
+                    val jpeg = count >= 3 && prefix[0] == 0xff.toByte() && prefix[1] == 0xd8.toByte() && prefix[2] == 0xff.toByte()
+                    val png = count >= 8 && prefix.take(8).map { it.toInt() and 0xff } == listOf(137, 80, 78, 71, 13, 10, 26, 10)
+                    val webp = count >= 12 && String(prefix, 0, 4) == "RIFF" && String(prefix, 8, 4) == "WEBP"
+                    check(jpeg || png || webp) { "Published bytes do not have a supported image signature; MIME=$mime size=$size" }
+                    val deleted = contentResolver.delete(publishedUri!!, null, null)
+                    check(deleted == 1) { "Could not remove the test-created MediaStore row" }
+                    publishedUri = null
+                    sendStatus(0, Bundle().apply {
+                        putString("stream", "Downloaded one Douyin image bytes=$size mime=$mime path=$relativePath signatures=valid cleanup=removed\n")
+                    })
+                }
+            } finally {
+                publishedUri?.let { contentResolver.delete(it, null, null) }
+                runOnMainSync { activity.finish() }
+            }
             return
         }
         val douyin = scenario.startsWith("douyin")

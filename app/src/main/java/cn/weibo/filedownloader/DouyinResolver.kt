@@ -3,7 +3,6 @@ package cn.weibo.filedownloader
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.BufferedInputStream
-import java.net.HttpURLConnection
 import java.net.URI
 import java.net.URL
 import java.net.URLDecoder
@@ -36,7 +35,12 @@ internal object DouyinLinkParser {
     }
 
     fun isSupportedShareUrl(value: String): Boolean {
-        val host = runCatching { URI(extractUrl(value)).host.orEmpty().lowercase() }.getOrDefault("")
+        val uri = runCatching { URI(extractUrl(value)) }.getOrNull() ?: return false
+        val scheme = uri.scheme?.lowercase().orEmpty()
+        if (scheme !in setOf("http", "https") || uri.rawUserInfo != null) return false
+        val defaultPort = if (scheme == "https") 443 else 80
+        if (uri.port != -1 && uri.port != defaultPort) return false
+        val host = uri.host.orEmpty().lowercase()
         return host == "douyin.com" || host.endsWith(".douyin.com") ||
             host == "iesdouyin.com" || host.endsWith(".iesdouyin.com")
     }
@@ -68,8 +72,10 @@ internal class DouyinLinkResolver {
         val sourceIds = DouyinLinkParser.extractPostIds(sourceUrl)
         if (sourceIds.isNotEmpty()) return DouyinResolvedLink(sourceUrl, sourceUrl, sourceIds)
 
-        val connection = (URL(sourceUrl).openConnection() as HttpURLConnection).apply {
-            instanceFollowRedirects = true
+        val connection = SafeHttpRedirects.openConnection(
+            sourceUrl,
+            allowRedirect = { DouyinLinkParser.isSupportedShareUrl(it.toExternalForm()) },
+        ) {
             connectTimeout = 20_000
             readTimeout = 20_000
             setRequestProperty("User-Agent", SHARE_USER_AGENT)
@@ -125,8 +131,10 @@ internal class DouyinWebDetailProvider(private val aid: String) : DouyinDetailPr
             "${URLEncoder.encode(key, StandardCharsets.UTF_8.name())}=" +
                 URLEncoder.encode(value, StandardCharsets.UTF_8.name())
         }
-        val connection = (URL("$DETAIL_ENDPOINT?$query").openConnection() as HttpURLConnection).apply {
-            instanceFollowRedirects = true
+        val connection = SafeHttpRedirects.openConnection(
+            "$DETAIL_ENDPOINT?$query",
+            allowRedirect = { DouyinLinkParser.isSupportedShareUrl(it.toExternalForm()) },
+        ) {
             connectTimeout = 20_000
             readTimeout = 30_000
             setRequestProperty("User-Agent", WEB_USER_AGENT)
