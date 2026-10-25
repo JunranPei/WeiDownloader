@@ -92,7 +92,7 @@ internal object TelegramHtmlParser {
     }
 
     fun parseMedia(html: String, postId: String): List<MediaItem> {
-        val values = mutableListOf<RawTelegramMedia>()
+        val values = mutableListOf<Pair<Int, RawTelegramMedia>>()
         val photoRegex = Regex(
             "<a\\s+([^>]*class=[\"'][^\"']*tgme_widget_message_photo_wrap[^\"']*[\"'][^>]*)>(.*?)</a>",
             setOf(RegexOption.IGNORE_CASE, RegexOption.DOT_MATCHES_ALL),
@@ -104,7 +104,7 @@ internal object TelegramHtmlParser {
             if (url.isBlank()) return@forEach
             val width = cssPixels(attribute(attributes, "style"), "width")
             val height = percentHeight(body, width)
-            values += RawTelegramMedia(MediaType.IMAGE, url, url, width, height)
+            values += match.range.first to RawTelegramMedia(MediaType.IMAGE, url, url, width, height)
         }
         val videoRegex = Regex(
             "<a\\s+([^>]*class=[\"'][^\"']*tgme_widget_message_video_player[^\"']*[\"'][^>]*)>(.*?)</a>",
@@ -128,9 +128,9 @@ internal object TelegramHtmlParser {
             )
             val width = cssPixels(wrapStyle, "width")
             val height = percentHeight(wrapStyle, width)
-            values += RawTelegramMedia(MediaType.VIDEO, url, thumbnail, width, height)
+            values += match.range.first to RawTelegramMedia(MediaType.VIDEO, url, thumbnail, width, height)
         }
-        return values.distinctBy { it.url }.mapIndexed { index, raw ->
+        return values.sortedBy { it.first }.map { it.second }.distinctBy { it.url }.mapIndexed { index, raw ->
             val variant = MediaVariant(
                 key = MediaQuality.PLATFORM_BEST,
                 url = raw.url,

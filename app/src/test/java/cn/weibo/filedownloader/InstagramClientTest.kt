@@ -49,6 +49,25 @@ class InstagramClientTest {
         assertEquals("https://cdn.example/cover.jpg", post?.media?.get(1)?.thumbnailUrl)
     }
 
+    @Test
+    fun normalizesPublicMixedCarouselFixtureInSourceOrder() {
+        val payload = javaClass.getResourceAsStream("/instagram-mixed-public-candidate.json")!!
+            .bufferedReader().use { JSONObject(it.readText()) }
+
+        val post = requireNotNull(
+            InstagramPostNormalizer.normalize(payload, "https://www.instagram.com/p/C4GhVSIqClB/"),
+        )
+
+        assertEquals("C4GhVSIqClB", post.id)
+        assertEquals(listOf(MediaType.VIDEO, MediaType.VIDEO, MediaType.IMAGE), post.media.map { it.type })
+        assertEquals(
+            listOf("3316484544544723063", "3316484643941319423", "3316484761952443921"),
+            post.media.map { it.sourceId },
+        )
+        assertTrue(post.media.all { it.url.startsWith("https://") })
+        assertTrue(post.media[0].thumbnailUrl.isNotBlank())
+    }
+
     private fun candidate(url: String, width: Int, height: Int) = JSONObject()
         .put("url", url)
         .put("width", width)

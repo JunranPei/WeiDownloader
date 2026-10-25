@@ -5,6 +5,12 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class RedditMediaTest {
+    @Test fun failedOrPendingGalleryItemDoesNotReturnPartialSuccess() {
+        for (status in listOf("failed", "processing", "invalid")) {
+            assertNull(post("""{"id":"abc123","gallery_data":{"items":[{"media_id":"one"},{"media_id":"two"}]},"media_metadata":{"one":{"status":"valid","s":{"u":"https://i.redd.it/one.jpg"}},"two":{"status":"$status","s":{"u":"https://i.redd.it/two.jpg"}}}}"""))
+        }
+    }
+
     private fun post(json: String) = RedditPostNormalizer.normalizePost(JSONObject(json), "https://redd.it/abc123")
 
     @Test fun originalImageWinsOverBlurredPreview() {

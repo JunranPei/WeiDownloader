@@ -7,6 +7,22 @@ import org.junit.Test
 
 class WeiboWorkNormalizerTest {
     @Test
+    fun audioAttachmentKeepsItsTypeAndFollowsThePostsImage() {
+        val status = JSONObject("""{
+            "id":"audio-post",
+            "pic_ids":["photo"],
+            "pic_infos":{"photo":{"large":{"url":"https://wx1.sinaimg.cn/large/photo.jpg"}}},
+            "page_info":{"object_type":"audio","media_info":{"audio_url":"https://media.example/recording.mp3"}}
+        }""")
+        val media = normalizer().parseMedia(status, QualityPreference.HIGHEST, "audio-post")
+        assertEquals(listOf(MediaType.IMAGE, MediaType.AUDIO), media.map { it.type })
+        assertEquals(listOf(1, 2), media.map { it.ordinal })
+        assertEquals("audio_audio-post_02.mp3", media.last().suggestedFileName())
+        assertEquals("https://media.example/recording.mp3", media.last().url)
+        assertTrue(media.all { it.postId == "audio-post" })
+    }
+
+    @Test
     fun findsForwardedOriginalImageAndKeepsRootPostId() {
         val status = JSONObject(
             """

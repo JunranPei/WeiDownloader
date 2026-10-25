@@ -7,6 +7,19 @@ import org.junit.Test
 
 class TelegramParserTest {
     @Test
+    fun mixedAlbumKeepsVideoBeforePhotoAndInterleavedOrder() {
+        val html = """
+            <a class="tgme_widget_message_video_player"><video src="https://cdn.example/first.mp4"></video></a>
+            <a class="tgme_widget_message_photo_wrap" style="background-image:url('https://cdn.example/second.jpg')"></a>
+            <a class="tgme_widget_message_video_player"><video src="https://cdn.example/third.mp4"></video></a>
+        """.trimIndent()
+        val media = TelegramHtmlParser.parseMedia(html, "telegram-459")
+        assertEquals(listOf(MediaType.VIDEO, MediaType.IMAGE, MediaType.VIDEO), media.map { it.type })
+        assertEquals(listOf("https://cdn.example/first.mp4", "https://cdn.example/second.jpg", "https://cdn.example/third.mp4"), media.map { it.url })
+        assertEquals(listOf(1, 2, 3), media.map { it.ordinal })
+    }
+
+    @Test
     fun parsesPublicPostLinks() {
         assertEquals(
             TelegramPostTarget("telegram", 459),

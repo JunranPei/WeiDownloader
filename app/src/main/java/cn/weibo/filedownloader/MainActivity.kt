@@ -574,7 +574,7 @@ class MainActivity : ComponentActivity() {
         val url = linkInput.text?.toString()?.trim().orEmpty()
         if (url.isBlank()) return toast(getString(R.string.link_required))
         adoptPlatformForUrl(url)
-        if (platform == Platform.REDDIT && linkInput.text?.toString() != url) {
+        if (linkInput.text?.toString() != url) {
             linkInput.setText(url)
             linkInput.setSelection(url.length)
         }

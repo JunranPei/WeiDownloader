@@ -252,7 +252,13 @@ class SafDownloadWorker(
                 else progressOffset + connection.contentLengthLong
             val statusStore = DownloadStatusStore(applicationContext)
             statusStore.updateWorkerTaskProgress(statusWorkId, progressOffset, totalBytes)
-            connection.inputStream.use { input ->
+            connection.inputStream.use { source ->
+                val sourceAddress = URL(sourceUrl)
+                val input = if (inputData.getString(KEY_PLATFORM) == Platform.X.key &&
+                    expectedType == MediaType.VIDEO && sourceAddress.host.equals("video.twimg.com", true) &&
+                    sourceAddress.path.startsWith("/tweet_video/") && sourceAddress.path.endsWith(".mp4")) {
+                    XGifTimingInputStream(source)
+                } else source
                 val buffer = ByteArray(BUFFER_SIZE)
                 var firstCount = input.read(buffer)
                 if (firstCount <= 0) throw DownloadSourceException("empty response body")

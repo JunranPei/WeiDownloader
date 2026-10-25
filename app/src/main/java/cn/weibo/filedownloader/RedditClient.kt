@@ -94,7 +94,7 @@ internal object RedditPostNormalizer {
             for (index in 0 until gallery.length()) {
                 val entry = metadata.optJSONObject(gallery.optJSONObject(index)?.optString("media_id").orEmpty())
                 if (entry == null) { clear(); return@buildList }
-                if (entry.has("status") && entry.optString("status") != "valid") continue
+                if (entry.has("status") && entry.optString("status") != "valid") { clear(); return@buildList }
                 val source = entry.optJSONObject("s")
                 if (source == null) { clear(); return@buildList }
                 val animated = entry.optString("e") == "AnimatedImage"
