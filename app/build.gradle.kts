@@ -12,8 +12,8 @@ android {
         applicationId = "cn.weibo.filedownloader"
         minSdk = 24
         targetSdk = 35
-        versionCode = 10044
-        versionName = "0.0.54"
+        versionCode = 10045
+        versionName = "0.0.55"
         testInstrumentationRunner = "cn.weibo.filedownloader.DownloadRefreshInstrumentation"
     }
 

@@ -10,6 +10,7 @@ internal data class WeiboWorkData(
     val title: String,
     val author: String,
     val media: List<MediaItem>,
+    val inventory: WeiboMediaInventory = WeiboMediaInventory(),
 )
 
 /**
@@ -32,16 +33,19 @@ internal class WeiboWorkNormalizer(
     ): WeiboWorkData? {
         val postId = data.optString("id", fallbackId)
         val author = data.optJSONObject("user")?.optString("screen_name", defaultAuthor) ?: defaultAuthor
-        val media = hydrateMediaMetadata(parseMedia(data, quality, postId)).ifEmpty {
-            fallbackMedia.mapIndexed { index, item -> item.copy(postId = postId, ordinal = index + 1) }
-        }
-        if (media.isEmpty()) return null
-        return WeiboWorkData(
+        val inventory = WeiboMediaInventory.read(findMediaSource(data))
+        val media = ArrayList<MediaItem>()
+        parseStatusMedia(findMediaSource(data), data, quality, postId, media, HashSet())
+        media += fallbackMedia.map { it.copy(postId = postId) }
+        if (media.isEmpty() && inventory.references.isEmpty() && inventory.minimumCount == 0) return null
+        val work = WeiboInventoryMerger.reconcile(WeiboWorkData(
             id = postId,
             title = cleanText(data.optString("text_raw", data.optString("text"))),
             author = author,
             media = media,
-        )
+            inventory = inventory,
+        ))
+        return work.copy(media = hydrateMediaMetadata(work.media))
     }
 
     /** Selects only the component video when a status contains mixed media. */
@@ -106,7 +110,7 @@ internal class WeiboWorkNormalizer(
         val seen = HashSet<String>()
         val source = findMediaSource(data)
         parseStatusMedia(source, data, quality, postId, media, seen)
-        return media
+        return WeiboInventoryMerger.reconcile(WeiboWorkData(postId, "", "", media, WeiboMediaInventory.read(source))).media
     }
 
     private fun parseStatusMedia(
@@ -118,13 +122,15 @@ internal class WeiboWorkNormalizer(
         seen: MutableSet<String>,
     ) {
         parsePicInfos(source, quality, postId, result, seen)
-        parsePics(source.optJSONArray("pics"), quality, postId, result, seen)
-        parseMixedMedia(source.optJSONObject("mix_media_info")?.optJSONArray("items"), quality, postId, result, seen)
+        parsePics(source, quality, postId, result, seen)
+        parseMixedMedia(source, quality, postId, result, seen)
+        parseMissingPictures(source, quality, postId, result, seen)
 
         val pageInfo = source.optJSONObject("page_info") ?: root.optJSONObject("page_info")
         parsePageInfo(pageInfo, quality, postId, result, seen)
         source.optJSONObject("media_info")?.let {
-            parseMediaInfo(it, source, quality, postId, result, seen)
+            parseMediaInfo(it, source, quality, postId, result, seen,
+                WeiboMediaInventory.videoReference(source, "", "status").key)
         }
     }
 
@@ -140,12 +146,12 @@ internal class WeiboWorkNormalizer(
         val ids = status.optJSONArray("pic_ids")
         if (ids != null) for (index in 0 until ids.length()) ids.optString(index).takeIf { it.isNotBlank() }?.let(orderedIds::add)
         infos.keys().forEach { if (it !in orderedIds) orderedIds += it }
-        val liveHints = liveVideoHints(status)
+        val liveHints = WeiboMediaInventory.liveVideoHints(status)
         orderedIds.forEachIndexed { index, id ->
             infos.optJSONObject(id)?.let { picture ->
                 val hint = liveHints[index]
                 if (hint.isNullOrBlank() || chooseLiveVideo(picture) != null) {
-                    parsePicture(picture, quality, postId, result, seen)
+                    parsePicture(picture, quality, postId, result, seen, id)
                 } else {
                     // Some mobile responses move the Live Photo clip out of
                     // pic_infos and expose it as pic_video/live_photo on the
@@ -154,84 +160,101 @@ internal class WeiboWorkNormalizer(
                     val enriched = JSONObject(picture.toString())
                         .put("type", "livephoto")
                         .put("video", livePhotoPlaybackUrl(hint))
-                    parsePicture(enriched, quality, postId, result, seen)
+                    parsePicture(enriched, quality, postId, result, seen, id)
                 }
             }
         }
     }
 
-    /** Returns live-video hints keyed by their picture index. */
-    private fun liveVideoHints(status: JSONObject): Map<Int, String> {
-        val result = linkedMapOf<Int, String>()
-        val indexed = status.optString("pic_video").trim()
-        if (indexed.isNotBlank()) {
-            indexed.split(',').forEach { entry ->
-                val separator = entry.indexOf(':')
-                if (separator <= 0) return@forEach
-                val index = entry.substring(0, separator).trim().toIntOrNull() ?: return@forEach
-                val value = entry.substring(separator + 1).trim()
-                if (value.isNotBlank()) result[index] = value
-            }
-        }
-        val livePhotos = when (val value = status.opt("live_photo")) {
-            is JSONArray -> (0 until value.length()).mapNotNull { value.optString(it).trim().takeIf(String::isNotBlank) }
-            is String -> value.trim().takeIf(String::isNotBlank)?.let(::listOf).orEmpty()
-            else -> emptyList()
-        }
-        if (livePhotos.isNotEmpty() && result.isEmpty()) {
-            var next = 0
-            livePhotos.forEach { value ->
-                while (result.containsKey(next)) next++
-                result.putIfAbsent(next++, value)
-            }
-        }
-        return result
-    }
-
-    private fun parsePics(
-        pictures: JSONArray?,
+    /** Recover source-declared pictures; the inventory places them among their source neighbours. */
+    private fun parseMissingPictures(
+        status: JSONObject,
         quality: QualityPreference,
         postId: String,
         result: MutableList<MediaItem>,
         seen: MutableSet<String>,
     ) {
+        val ids = status.optJSONArray("pic_ids") ?: return
+        val present = result.asSequence().filter { it.type == MediaType.IMAGE || it.type == MediaType.LIVE_PHOTO }
+            .flatMap { WeiboMediaIdentity.keys(it).asSequence() }
+            .filter { it.startsWith("picture:") }.map { it.removePrefix("picture:") }.toMutableSet()
+        val liveHints = WeiboMediaInventory.liveVideoHints(status)
+        for (index in 0 until ids.length()) {
+            val id = ids.optString(index)
+            if (!WeiboMediaIdentity.pictureIdPattern.matches(id) || !present.add(id)) continue
+            val picture = JSONObject().put("large", JSONObject().put("url", "https://wx1.sinaimg.cn/large/$id.jpg"))
+            liveHints[index]?.let { hint ->
+                picture.put("type", "livephoto").put("video", livePhotoPlaybackUrl(hint))
+            }
+            parsePicture(picture, quality, postId, result, seen, id)
+        }
+    }
+
+    private fun parsePics(
+        status: JSONObject,
+        quality: QualityPreference,
+        postId: String,
+        result: MutableList<MediaItem>,
+        seen: MutableSet<String>,
+    ) {
+        val pictures = status.optJSONArray("pics")
         if (pictures == null) return
+        val ids = status.optJSONArray("pic_ids")
+        val orderedIds = (0 until (ids?.length() ?: 0)).map { ids!!.optString(it) }
+        val liveHints = WeiboMediaInventory.liveVideoHints(status)
         for (index in 0 until pictures.length()) {
             val picture = pictures.optJSONObject(index) ?: continue
             if (picture.optString("type").equals("video", true)) {
+                val reference = WeiboMediaInventory.videoReference(picture,
+                    status.optJSONArray("mix_media_ids")?.optString(index).orEmpty(), "pics:$index")
+                val enriched = if (reference.objectId.isNotBlank()) JSONObject(picture.toString()).put("object_id", reference.objectId) else picture
                 val mediaInfo = picture.optJSONObject("media_info")
-                if (mediaInfo != null) parseMediaInfo(mediaInfo, picture, quality, postId, result, seen)
-                else addDirectMedia(picture, MediaType.VIDEO, quality, postId, result, seen, thumbnailFrom(picture))
+                if (mediaInfo != null) parseMediaInfo(mediaInfo, enriched, quality, postId, result, seen, reference.key)
+                else addDirectMedia(enriched, MediaType.VIDEO, quality, postId, result, seen, thumbnailFrom(picture), reference.key)
             } else {
-                parsePicture(picture, quality, postId, result, seen)
+                val id = picture.optString("pid").ifBlank { picture.optString("pic_id") }
+                val hint = liveHints[orderedIds.indexOf(id)]
+                val enriched = if (!hint.isNullOrBlank() && chooseLiveVideo(picture) == null)
+                    JSONObject(picture.toString()).put("type", "livephoto").put("video", livePhotoPlaybackUrl(hint)) else picture
+                parsePicture(enriched, quality, postId, result, seen, id)
             }
         }
     }
 
     private fun parseMixedMedia(
-        items: JSONArray?,
+        status: JSONObject,
         quality: QualityPreference,
         postId: String,
         result: MutableList<MediaItem>,
         seen: MutableSet<String>,
     ) {
-        if (items == null) return
+        val items = status.optJSONObject("mix_media_info")?.optJSONArray("items") ?: return
+        val ids = status.optJSONArray("pic_ids")
+        val orderedIds = (0 until (ids?.length() ?: 0)).map { ids!!.optString(it) }
+        val liveHints = WeiboMediaInventory.liveVideoHints(status)
         for (index in 0 until items.length()) {
             val item = items.optJSONObject(index) ?: continue
-            val data = item.optJSONObject("data") ?: item
+            var data = item.optJSONObject("data") ?: item
             val type = item.optString("type", data.optString("type")).lowercase()
             val objectType = data.optString("object_type").lowercase()
             if (type == "video" || objectType == "video") {
+                val reference = WeiboMediaInventory.videoReference(data, item.optString("id"), "mixed:$index")
+                if (reference.objectId.isNotBlank()) data = JSONObject(data.toString()).put("object_id", reference.objectId)
                 val start = result.size
                 val mediaInfo = data.optJSONObject("media_info") ?: item.optJSONObject("media_info")
-                if (mediaInfo != null) parseMediaInfo(mediaInfo, data, quality, postId, result, seen)
-                else addDirectMedia(data, MediaType.VIDEO, quality, postId, result, seen, thumbnailFrom(data))
+                if (mediaInfo != null) parseMediaInfo(mediaInfo, data, quality, postId, result, seen, reference.key)
+                else addDirectMedia(data, MediaType.VIDEO, quality, postId, result, seen, thumbnailFrom(data), reference.key)
                 val objectId = videoObjectId(data).ifBlank { videoObjectId(item) }
                 if (objectId.isNotBlank()) for (position in start until result.size) {
                     result[position] = result[position].copy(videoObjectId = objectId)
                 }
             } else {
-                parsePicture(data.optJSONObject("pic_info") ?: data, quality, postId, result, seen)
+                val id = item.optString("id").ifBlank { data.optString("pic_id") }
+                val picture = data.optJSONObject("pic_info") ?: data
+                val hint = liveHints[orderedIds.indexOf(id)]
+                val enriched = if (!hint.isNullOrBlank() && chooseLiveVideo(picture) == null)
+                    JSONObject(picture.toString()).put("type", "livephoto").put("video", livePhotoPlaybackUrl(hint)) else picture
+                parsePicture(enriched, quality, postId, result, seen, id)
             }
         }
     }
@@ -242,8 +265,10 @@ internal class WeiboWorkNormalizer(
         postId: String,
         result: MutableList<MediaItem>,
         seen: MutableSet<String>,
+        pictureId: String = "",
     ) {
         val thumbnail = chooseThumbnail(picture).ifBlank { thumbnailFrom(picture) }
+        val identity = WeiboMediaInventory.pictureReference(picture, pictureId).key
         val liveUrl = chooseLiveVideo(picture)
         val imageVariants = collectImageVariants(picture)
         val selectedVariant = chooseImageVariant(imageVariants, quality)
@@ -256,6 +281,7 @@ internal class WeiboWorkNormalizer(
             add(
                 result, seen, MediaType.LIVE_PHOTO, selectedLiveVariant.url, MediaQuality.LIVE_ORIGINAL,
                 postId, result.size + 1, thumbnail, cover, liveVariants, selectedLiveVariant.key,
+                sourceId = identity,
             )
         } else {
             selectedVariant?.let {
@@ -270,6 +296,7 @@ internal class WeiboWorkNormalizer(
                     thumbnailUrl = thumbnail.ifBlank { it.url },
                     variants = imageVariants,
                     selectedVariantKey = it.key,
+                    sourceId = identity,
                 )
             }
         }
@@ -284,7 +311,8 @@ internal class WeiboWorkNormalizer(
     ) {
         if (pageInfo == null) return
         val mediaInfo = pageInfo.optJSONObject("media_info") ?: pageInfo.optJSONObject("media") ?: return
-        parseMediaInfo(mediaInfo, pageInfo, quality, postId, result, seen)
+        parseMediaInfo(mediaInfo, pageInfo, quality, postId, result, seen,
+            if (WeiboMediaInventory.isVideo(pageInfo)) WeiboMediaInventory.videoReference(pageInfo, "", "page").key else "")
     }
 
     private fun parseMediaInfo(
@@ -294,6 +322,7 @@ internal class WeiboWorkNormalizer(
         postId: String,
         result: MutableList<MediaItem>,
         seen: MutableSet<String>,
+        sourceId: String = "",
     ) {
         val thumbnail = thumbnailFrom(container).ifBlank { thumbnailFrom(mediaInfo) }
         val type = container.optString("type").lowercase()
@@ -327,28 +356,12 @@ internal class WeiboWorkNormalizer(
                 videoQualityLabel(quality, playlistVariants.isNotEmpty()), postId, result.size + 1,
                 thumbnail, variants = videoVariants, selectedVariantKey = selectedVideo?.key,
                 videoObjectId = videoObjectId(container).ifBlank { videoObjectId(mediaInfo) },
+                sourceId = sourceId,
             )
         }
     }
 
-    private fun findMediaSource(status: JSONObject): JSONObject {
-        if (hasMediaCollection(status)) return status
-        status.optJSONObject("retweeted_status")?.let { forwarded ->
-            val forwardedSource = findMediaSource(forwarded)
-            if (hasMediaContainer(forwardedSource)) return forwardedSource
-        }
-        return status
-    }
-
-    private fun hasMediaCollection(status: JSONObject): Boolean =
-        (status.optJSONObject("pic_infos")?.length() ?: 0) > 0 ||
-            (status.optJSONArray("pics")?.length() ?: 0) > 0 ||
-            (status.optJSONObject("mix_media_info")?.optJSONArray("items")?.length() ?: 0) > 0
-
-    private fun hasMediaContainer(status: JSONObject): Boolean =
-        hasMediaCollection(status) ||
-            status.optJSONObject("page_info")?.optJSONObject("media_info") != null ||
-            status.optJSONObject("media_info") != null
+    private fun findMediaSource(status: JSONObject): JSONObject = WeiboMediaInventory.source(status)
 
     private fun add(
         result: MutableList<MediaItem>,
@@ -363,9 +376,10 @@ internal class WeiboWorkNormalizer(
         variants: List<MediaVariant> = emptyList(),
         selectedVariantKey: String? = null,
         videoObjectId: String = "",
+        sourceId: String = "",
     ) {
-        if (url.isNotBlank() && seen.add(url)) {
-            result += MediaItem(
+        if (url.isNotBlank()) {
+            val item = MediaItem(
                 type = type,
                 url = url,
                 quality = quality,
@@ -376,7 +390,12 @@ internal class WeiboWorkNormalizer(
                 variants = variants,
                 selectedVariantKey = selectedVariantKey,
                 videoObjectId = videoObjectId,
+                sourceId = sourceId,
             )
+            val existing = result.indexOfFirst { it.url == url && it.type == type &&
+                (it.videoObjectId.isBlank() || videoObjectId.isBlank() || it.videoObjectId == videoObjectId) }
+            if (existing < 0) result += item else result[existing] = WeiboInventoryMerger.mergeItem(result[existing], item)
+            seen += url
         }
     }
 
@@ -388,6 +407,7 @@ internal class WeiboWorkNormalizer(
         result: MutableList<MediaItem>,
         seen: MutableSet<String>,
         thumbnail: String,
+        sourceId: String = "",
     ) {
         val variants = collectDirectMediaVariants(data, type)
         val selected = chooseMediaVariant(variants, quality)
@@ -405,6 +425,7 @@ internal class WeiboWorkNormalizer(
             variants = variants,
             selectedVariantKey = selected?.key,
             videoObjectId = if (type == MediaType.VIDEO) videoObjectId(data) else "",
+            sourceId = sourceId,
         )
     }
 

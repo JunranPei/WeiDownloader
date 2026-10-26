@@ -41,15 +41,23 @@ class WeiboClient(
         fun component(objectId: String): WeiboWorkData? = if (components.containsKey(objectId)) components[objectId]
             else runCatching { loadVideoWork(objectId, quality, resolveStatus = false) }.getOrNull()
                 .also { components[objectId] = it }
-        val work = WeiboStatusWorkResolver.resolve(
+        val work = try { WeiboStatusWorkResolver.resolve(
             providers = statusProviders.map { provider -> { provider.load(id) } },
             normalize = { data ->
-                normalizer.normalizeStatus(data, id, quality, defaultAuthor) ?: run {
-                    val fallback = normalizer.videoObjectIds(data).mapNotNull(::component).flatMap { it.media }
-                    normalizer.normalizeStatus(data, id, quality, defaultAuthor, fallback)
-                }
+                normalizer.normalizeStatus(data, id, quality, defaultAuthor)
             },
-        ) ?: throw WeiboException(context.getString(R.string.no_media))
+            complete = { status -> WeiboStatusWorkResolver.completeVideos(status) { reference ->
+                val objectId = reference.objectId.ifBlank {
+                    if (reference.link.isBlank()) ""
+                    else (linkResolver.resolve(reference.link).target as? WeiboLinkTarget.VideoObject)?.objectId.orEmpty()
+                }
+                if (objectId.isBlank()) null else component(objectId)?.media?.singleOrNull {
+                    it.type == MediaType.VIDEO && it.videoObjectId == objectId
+                }
+            } },
+        ) } catch (_: WeiboIncompleteMediaException) {
+            throw WeiboException(context.getString(R.string.weibo_media_incomplete))
+        } ?: throw WeiboException(context.getString(R.string.no_media))
         return WeiboVideoWorkResolver.upgradeVideos(work, ::component).toPost(sourceUrl)
     }
 

@@ -7,6 +7,31 @@ import org.junit.Test
 
 class WeiboWorkNormalizerTest {
     @Test
+    fun pictureIdsAloneRecoverImagesButInvalidIdsNeverBecomeUrls() {
+        val id = "008no9MSly1i00me7xhoqj32vz3uwe85"
+        val data = JSONObject("""{"id":"post","pic_ids":["$id","$id","","../outside","https://example.org/a.jpg",null]}""")
+        val media = normalizer().parseMedia(data, QualityPreference.HIGHEST)
+        assertEquals(1, media.size)
+        assertEquals("https://wx1.sinaimg.cn/large/$id.jpg", media.single().url)
+        assertEquals(1, media.single().ordinal)
+    }
+
+    @Test
+    fun pictureCompletionRecognizesExistingLiveCoverAndKeepsMissingLiveHint() {
+        val first = "008no9MSly1i00me7xhoqj32vz3uwe85"
+        val second = "008no9MSly1i00me6uucmj32fc38ou10"
+        val data = JSONObject("""{
+            "id":"post", "pic_ids":["$first","$second"], "pic_video":"0:first-fid,1:second-fid",
+            "pic_infos":{"$first":{"large":{"url":"https://wx4.sinaimg.cn/large/$first.jpg"}}}
+        }""")
+        val media = normalizer().parseMedia(data, QualityPreference.HIGHEST)
+        assertEquals(listOf(MediaType.LIVE_PHOTO, MediaType.LIVE_PHOTO), media.map { it.type })
+        assertTrue(media[0].url.contains("first-fid.mov"))
+        assertTrue(media[1].url.contains("second-fid.mov"))
+        assertEquals(listOf(1, 2), media.map { it.ordinal })
+    }
+
+    @Test
     fun audioAttachmentKeepsItsTypeAndFollowsThePostsImage() {
         val status = JSONObject("""{
             "id":"audio-post",

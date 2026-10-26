@@ -72,18 +72,14 @@ internal object WeiboVideoWorkResolver {
             val candidates = supplement.media.filter { candidate ->
                 candidate.type == MediaType.VIDEO && if (original.videoObjectId.isNotBlank() && candidate.videoObjectId.isNotBlank()) {
                     original.videoObjectId == candidate.videoObjectId
-                } else if (status.media.size == 1 && supplement.media.size == 1 ||
-                    original.videoObjectId.isBlank() && candidate.videoObjectId.isBlank()) {
-                    original.postId == candidate.postId &&
-                        (original.ordinal == candidate.ordinal || status.media.size == 1 && supplement.media.size == 1)
-                } else false
+                } else WeiboMediaIdentity.keys(original).any { it in WeiboMediaIdentity.keys(candidate) }
             }
             candidates.fold(original, ::mergeVideo)
         }
         return if (media == status.media) status else status.copy(media = media)
     }
 
-    private fun mergeVideo(original: MediaItem, candidate: MediaItem): MediaItem {
+    internal fun mergeVideo(original: MediaItem, candidate: MediaItem): MediaItem {
         val preferred = if (compareVariants(selected(candidate), selected(original)) > 0) candidate else original
         val other = if (preferred === original) candidate else original
         val variants = (variants(preferred) + variants(other)).distinctBy { it.url }.distinctBy { it.key }
@@ -93,6 +89,7 @@ internal object WeiboVideoWorkResolver {
             postId = original.postId,
             ordinal = original.ordinal,
             videoObjectId = original.videoObjectId.ifBlank { candidate.videoObjectId },
+            sourceId = original.sourceId.ifBlank { candidate.sourceId },
             thumbnailUrl = original.thumbnailUrl.ifBlank { candidate.thumbnailUrl },
             coverUrl = original.coverUrl,
             url = selected.url,

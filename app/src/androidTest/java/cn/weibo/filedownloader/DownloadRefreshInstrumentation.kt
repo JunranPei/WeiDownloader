@@ -73,6 +73,21 @@ class DownloadRefreshInstrumentation : Instrumentation() {
 
     private fun verify() {
         val app = targetContext.applicationContext
+        if (scenario == "weibo-status-inventory") {
+            val id = requireNotNull(options?.getString("expectedId"))
+            require(id.matches(Regex("[0-9]+")))
+            val http = WeiboHttpClient(app)
+            val folder = File(app.cacheDir, "weibo-gallery-20261026").apply { mkdirs() }
+            for (provider in listOf(WeiboMobileStatusDetailProvider(http, app), WeiboDesktopStatusDetailProvider(http, app))) {
+                val data = requireNotNull(provider.load(id))
+                File(folder, "$id-${provider.name}.json").writeText(data.toString())
+                val media = WeiboWorkNormalizer(false).parseMedia(data, QualityPreference.HIGHEST)
+                sendStatus(0, Bundle().apply {
+                    putString("stream", "provider=${provider.name} id=$id declared=${data.optInt("pic_num")} parsed=${media.size} types=${media.map { it.type }}\n")
+                })
+            }
+            return
+        }
         if (scenario == "inspect-cache-media") {
             val name = requireNotNull(options?.getString("file"))
             require(File(name).name == name)
@@ -670,6 +685,17 @@ class DownloadRefreshInstrumentation : Instrumentation() {
             }
             options?.getString("expectedSourceIds")?.let { expected ->
                 check(post.media.map { it.sourceId } == expected.split(',')) { "Unexpected attachment identity/order" }
+            }
+            options?.getString("expectedWeiboMediaIds")?.let { expected ->
+                require(platform == Platform.WEIBO)
+                val actual = post.media.map { item ->
+                    if (item.type == MediaType.VIDEO) item.videoObjectId.ifBlank { Uri.parse(item.url).lastPathSegment.orEmpty() }
+                    else Uri.parse(item.url).lastPathSegment.orEmpty().substringBeforeLast('.')
+                }
+                val expectedIds = expected.split(',').map { it.split('|') }
+                check(actual.size == expectedIds.size && actual.indices.all { actual[it] in expectedIds[it] }) {
+                    "Unexpected Weibo attachment identity/order: $actual"
+                }
             }
             check(indices.all { it in post.media.indices }) {
                 "Requested indices=$indices outside media count=${post.media.size}"

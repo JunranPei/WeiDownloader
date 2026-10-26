@@ -172,6 +172,7 @@
     <string name="client_login_required">The public endpoint did not return this post. Sign in to Weibo in the app and try again.</string>
     <string name="default_author">Weibo user</string>
     <string name="no_media">No downloadable images, Live Photos, videos, or audio were found. The post may be restricted.</string>
+    <string name="weibo_media_incomplete">Weibo returned incomplete media information. Some images or videos are still missing. Retry or update your login.</string>
     <string name="weibo_http_error">Weibo returned HTTP %1$d. Check your sign-in status.</string>
     <string name="weibo_empty_response">Weibo returned an empty response. Try again shortly.</string>
     <string name="network_error">Network connection error</string>

@@ -51,7 +51,7 @@ class WeiboVideoWorkResolverTest {
             MediaType.VIDEO, "https://f.video.weibocdn.com/status-720.mp4",
             MediaQuality.PLAYLIST_MAX, mid, 3,
             variants = listOf(MediaVariant("720p", "https://f.video.weibocdn.com/status-720.mp4", 1280, 720)),
-            selectedVariantKey = "720p",
+            selectedVariantKey = "720p", videoObjectId = oid,
         )
         val work = WeiboVideoWorkResolver.resolve(listOf({ component() }), {
             WeiboWorkData(mid, "original title", "author", listOf(statusVideo))
@@ -68,7 +68,7 @@ class WeiboVideoWorkResolverTest {
             MediaType.VIDEO, "https://f.video.weibocdn.com/status-4k.mp4",
             MediaQuality.PLAYLIST_MAX, mid, 1,
             variants = listOf(MediaVariant("4k", "https://f.video.weibocdn.com/status-4k.mp4", 3840, 2160)),
-            selectedVariantKey = "4k",
+            selectedVariantKey = "4k", videoObjectId = oid,
         )
         val work = WeiboVideoWorkResolver.resolve(listOf({ component() }), {
             WeiboWorkData(mid, "original title", "author", listOf(statusVideo))
@@ -84,7 +84,7 @@ class WeiboVideoWorkResolverTest {
             MediaType.VIDEO, "https://f.video.weibocdn.com/status-720.mp4",
             MediaQuality.PLAYLIST_MAX, mid, 1,
             variants = listOf(MediaVariant("720p", "https://f.video.weibocdn.com/status-720.mp4", 1280, 720)),
-            selectedVariantKey = "720p",
+            selectedVariantKey = "720p", videoObjectId = oid,
         )
         val status = WeiboWorkData(mid, "original status", "author", listOf(statusVideo))
         val component = normalize(component())!!
