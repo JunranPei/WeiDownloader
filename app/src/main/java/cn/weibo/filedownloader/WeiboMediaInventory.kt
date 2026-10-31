@@ -115,15 +115,18 @@ internal data class WeiboMediaInventory(
                 }
             }
             val livePhotos = when (val value = status.opt("live_photo")) {
-                is JSONArray -> (0 until value.length()).mapNotNull { value.optString(it).trim().takeIf(String::isNotBlank) }
+                is JSONArray -> (0 until value.length()).map { value.optString(it).trim() }
                 is String -> value.trim().takeIf(String::isNotBlank)?.let(::listOf).orEmpty()
                 else -> emptyList()
             }
-            if (livePhotos.isNotEmpty() && result.isEmpty()) {
-                var next = 0
-                livePhotos.forEach { value ->
-                    while (result.containsKey(next)) next++
-                    result.putIfAbsent(next++, value)
+            // live_photo can be a compact list of only the live clips. It has
+            // no picture indices: assigning it to pictures 0, 1, ... corrupts
+            // mixed galleries. Only a full positional list is unambiguous;
+            // otherwise pics/pic_infos carry each clip's actual picture ID.
+            val pictureCount = status.optJSONArray("pic_ids")?.length() ?: 0
+            if (pictureCount > 0 && livePhotos.size == pictureCount) {
+                livePhotos.forEachIndexed { index, value ->
+                    if (value.isNotBlank() && value != "null") result.putIfAbsent(index, value)
                 }
             }
             return result

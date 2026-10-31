@@ -5,6 +5,38 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class WeiboMediaInventoryTest {
+    @Test
+    fun reportedCompactLivePhotoListPreservesSevenPicturesAndActualLivePositions() {
+        val data = JSONObject(requireNotNull(javaClass.getResource("/weibo/5360196664164603-mobile.json")).readText())
+        val work = resolve(data)
+        assertEquals("5360196664164603", work.id)
+        assertEquals(listOf(MediaType.IMAGE, MediaType.IMAGE, MediaType.IMAGE, MediaType.LIVE_PHOTO,
+            MediaType.IMAGE, MediaType.LIVE_PHOTO, MediaType.IMAGE), work.media.map { it.type })
+        assertEquals((0 until 7).map { "picture:${data.getJSONArray("pic_ids").getString(it)}" }, work.media.map { it.sourceId })
+        assertEquals((0 until 2).map { data.getJSONArray("live_photo").getString(it) },
+            work.media.filter { it.type == MediaType.LIVE_PHOTO }.map { it.url })
+        assertTrue(work.inventory.missing(work.media).isEmpty())
+        assertTrue(WeiboMediaInventory.liveVideoHints(data).isEmpty())
+    }
+
+    @Test
+    fun compactLiveListWithoutPicturePositionsDoesNotInventAssociations() {
+        val data = status(a, b, c).put("pic_ids", org.json.JSONArray(listOf(a, b, c)))
+            .put("live_photo", org.json.JSONArray(listOf("clip.mov")))
+        assertTrue(WeiboMediaInventory.liveVideoHints(data).isEmpty())
+        assertEquals(List(3) { MediaType.IMAGE }, parse(data).map { it.type })
+    }
+
+    @Test
+    fun fullPositionalLiveListPreservesEmptySlotsAndExplicitIndexPrecedence() {
+        val data = status(a, b, c).put("pic_ids", org.json.JSONArray(listOf(a, b, c)))
+            .put("live_photo", org.json.JSONArray("""[null,"second.mov",""]"""))
+        assertEquals(mapOf(1 to "second.mov"), WeiboMediaInventory.liveVideoHints(data))
+        assertEquals(listOf(MediaType.IMAGE, MediaType.LIVE_PHOTO, MediaType.IMAGE), resolve(data).media.map { it.type })
+        data.put("pic_video", "1:explicit.mov")
+        assertEquals(mapOf(1 to "explicit.mov"), WeiboMediaInventory.liveVideoHints(data))
+    }
+
     private val a = "008no9MSly1i00me6rqirj32np3juqv9"
     private val b = "008no9MSly1i00me7od3pj33gr4mokjp"
     private val c = "008no9MSly1i00me7h741j32rt3pce85"

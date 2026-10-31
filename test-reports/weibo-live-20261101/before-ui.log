@@ -1,0 +1,7 @@
+FAIL platform-parse: java.lang.IllegalArgumentException: No parsed post; source=https://weibo.com/5886191812/5360196664164603 summary=Weibo returned incomplete media information. Some images or videos are still missing. Retry or update your login.
+	at cn.weibo.filedownloader.DownloadRefreshInstrumentation.verifyPlatformDownload(DownloadRefreshInstrumentation.kt:669)
+	at cn.weibo.filedownloader.DownloadRefreshInstrumentation.verify(DownloadRefreshInstrumentation.kt:150)
+	at cn.weibo.filedownloader.DownloadRefreshInstrumentation.onStart(DownloadRefreshInstrumentation.kt:63)
+	at android.app.Instrumentation$InstrumentationThread.run(Instrumentation.java:2627)
+
+
