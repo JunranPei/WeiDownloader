@@ -1,0 +1,98 @@
+{
+  "id_str": "1132756461357629440",
+  "type": 0,
+  "basic": {
+    "comment_type": 11,
+    "comment_id_str": "373360600",
+    "title": "请给许攸攸面子的动态 - 哔哩哔哩",
+    "uid": "610540264",
+    "tribee": null,
+    "like_icon": {
+      "id": "0",
+      "start_url": "",
+      "action_url": "",
+      "end_url": ""
+    },
+    "editable": false,
+    "aigc": false,
+    "open_app_extra": "",
+    "rid_str": "373360600",
+    "article_type": 0,
+    "is_only_fans": false
+  },
+  "modules": [
+    {
+      "module_type": "MODULE_TYPE_TOP",
+      "module_top": {
+        "display": {
+          "type": 1,
+          "album": {
+            "pics": [
+              {
+                "url": "http://i0.hdslb.com/bfs/new_dyn/live_2d22bf9bdaa7b7b3fe343dba6413a31a610540264.jpg",
+                "width": 4284,
+                "height": 5712,
+                "size": 1250.492,
+                "aigc": 0,
+                "warning": null,
+                "live_url": "https://i0.hdslb.com/bfs/dyn_video/_00001klwfz545aiyx21vaslbgy4rdvb-1-152111110012.mp4"
+              },
+              {
+                "url": "http://i0.hdslb.com/bfs/new_dyn/live_d10b4b66bf5cc9bda883fffe17840bdb610540264.jpg",
+                "width": 3024,
+                "height": 4032,
+                "size": 835.553,
+                "aigc": 0,
+                "warning": null,
+                "live_url": "https://i0.hdslb.com/bfs/dyn_video/_000036cc9cdi8b3ax2rdc22p87ojf9b-1-152111110012.mp4"
+              },
+              {
+                "url": "http://i0.hdslb.com/bfs/new_dyn/live_02b0f2ca87590cfd4ade9633223961a9610540264.jpg",
+                "width": 3024,
+                "height": 4032,
+                "size": 791.684,
+                "aigc": 0,
+                "warning": null,
+                "live_url": "https://i0.hdslb.com/bfs/dyn_video/_00002osv3vc3ydb5a2mxyefefysx3db-1-152111110012.mp4"
+              },
+              {
+                "url": "http://i0.hdslb.com/bfs/new_dyn/live_1656a23b13fc33e31599690257a663cd610540264.jpg",
+                "width": 3024,
+                "height": 4032,
+                "size": 872.568,
+                "aigc": 0,
+                "warning": null,
+                "live_url": "https://i0.hdslb.com/bfs/dyn_video/_00002mrn55seshu932w1bl011fnmb9b-1-152111110012.mp4"
+              },
+              {
+                "url": "http://i0.hdslb.com/bfs/new_dyn/live_d5234ff739528d3854ff782f254fb162610540264.jpg",
+                "width": 3024,
+                "height": 4032,
+                "size": 1148.928,
+                "aigc": 0,
+                "warning": null,
+                "live_url": "https://i0.hdslb.com/bfs/dyn_video/_00003pjrwh8k6b63n24aovgplk7rahb-1-152111110012.mp4"
+              }
+            ]
+          },
+          "video": null
+        }
+      },
+      "module_title": null,
+      "module_author": null,
+      "module_collection": null,
+      "module_dispute": null,
+      "module_topic": null,
+      "module_content": null,
+      "module_reprint_source": null,
+      "module_blocked": null,
+      "module_extend": null,
+      "module_copyright": null,
+      "module_bottom": null,
+      "module_stat": null,
+      "module_item_null": null,
+      "module_paywall": null,
+      "module_tribee": null
+    }
+  ]
+}

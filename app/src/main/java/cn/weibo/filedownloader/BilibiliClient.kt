@@ -239,9 +239,8 @@ internal class BilibiliWebOpusPostProvider(
                 }
             }
         }
-        val images = LinkedHashMap<String, BilibiliImageSource>()
-        collectOpusImages(detail, images)
-        if (images.isEmpty()) throw BilibiliException(context.getString(R.string.bilibili_opus_source_missing))
+        val media = BilibiliOpusMediaParser.parse(detail, target.id, context.getString(R.string.image_variant_original))
+        if (media.isEmpty()) throw BilibiliException(context.getString(R.string.bilibili_opus_source_missing))
         val resolvedAuthor = author.ifBlank { context.getString(R.string.bilibili_default_author) }
         val resolvedTitle = title.ifBlank { textParts.joinToString("").trim() }
             .ifBlank { context.getString(R.string.bilibili_default_title) }
@@ -250,24 +249,7 @@ internal class BilibiliWebOpusPostProvider(
             text = resolvedTitle,
             author = resolvedAuthor,
             sourceUrl = link.sourceUrl,
-            media = images.values.mapIndexed { index, image ->
-                val variant = MediaVariant(
-                    key = context.getString(R.string.image_variant_original),
-                    url = image.url,
-                    width = image.width,
-                    height = image.height,
-                )
-                MediaItem(
-                    type = MediaType.IMAGE,
-                    url = image.url,
-                    quality = MediaQuality.ORIGINAL_BEST,
-                    postId = target.id,
-                    ordinal = index + 1,
-                    thumbnailUrl = image.url,
-                    variants = listOf(variant),
-                    selectedVariantKey = variant.key,
-                )
-            },
+            media = media,
             creator = CreatorProfile(
                 platform = Platform.BILIBILI,
                 id = authorId,
@@ -278,12 +260,52 @@ internal class BilibiliWebOpusPostProvider(
         )
     }
 
+}
+
+/** The still and live_url in one picture object describe a single attachment. */
+internal object BilibiliOpusMediaParser {
+    fun parse(detail: JSONObject, postId: String, originalLabel: String): List<MediaItem> {
+        val images = LinkedHashMap<String, BilibiliImageSource>()
+        collectOpusImages(detail, images)
+        return images.values.mapIndexed { index, image ->
+            val live = image.liveUrl.isNotBlank()
+            val variant = MediaVariant(
+                key = if (live) MediaQuality.LIVE_ORIGINAL else originalLabel,
+                url = if (live) image.liveUrl else image.url,
+                // Picture dimensions belong to the still, not the paired clip.
+                width = if (live) 0 else image.width,
+                height = if (live) 0 else image.height,
+            )
+            MediaItem(
+                type = if (live) MediaType.LIVE_PHOTO else MediaType.IMAGE,
+                url = variant.url,
+                quality = if (live) MediaQuality.LIVE_ORIGINAL else MediaQuality.ORIGINAL_BEST,
+                postId = postId,
+                ordinal = index + 1,
+                thumbnailUrl = image.url,
+                coverUrl = if (live) image.url else "",
+                variants = listOf(variant),
+                selectedVariantKey = variant.key,
+            )
+        }
+    }
+
     private fun collectOpusImages(value: Any?, result: LinkedHashMap<String, BilibiliImageSource>) {
         when (value) {
             is JSONObject -> {
                 val url = value.optString("url").toHttps()
                 if (isOpusImage(url)) {
-                    result.putIfAbsent(url, BilibiliImageSource(url, value.optInt("width"), value.optInt("height")))
+                    val liveUrl = value.optString("live_url").toHttps().takeIf { candidate ->
+                        runCatching {
+                            val uri = java.net.URI(candidate)
+                            uri.scheme in setOf("https", "http") && !uri.host.isNullOrBlank()
+                        }.getOrDefault(false)
+                    }.orEmpty()
+                    val previous = result[url]
+                    // A cover may also occur without live metadata elsewhere in the page.
+                    if (previous == null || previous.liveUrl.isBlank() && liveUrl.isNotBlank()) {
+                        result[url] = BilibiliImageSource(url, value.optInt("width"), value.optInt("height"), liveUrl)
+                    }
                 }
                 value.keys().forEach { key -> collectOpusImages(value.opt(key), result) }
             }
@@ -295,7 +317,7 @@ internal class BilibiliWebOpusPostProvider(
         url.contains("hdslb.com/bfs/article/")
 }
 
-private data class BilibiliImageSource(val url: String, val width: Int, val height: Int)
+private data class BilibiliImageSource(val url: String, val width: Int, val height: Int, val liveUrl: String)
 
 internal fun extractAssignedJson(page: String, marker: String): JSONObject? {
     val markerIndex = page.indexOf(marker)

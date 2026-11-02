@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="cn.weibo.filedownloader.BilibiliPlaybackTest" tests="7" skipped="0" failures="0" errors="0" timestamp="2026-11-02T12:45:00" hostname="JUNRAN的没有薯" time="0.018">
+  <properties/>
+  <testcase name="doesNotLoseUnsupportedAudioSilently" classname="cn.weibo.filedownloader.BilibiliPlaybackTest" time="0.004"/>
+  <testcase name="matchesFixedWbiSignatureVector" classname="cn.weibo.filedownloader.BilibiliPlaybackTest" time="0.005"/>
+  <testcase name="ignoresEmptySourcesAndAcceptsBackupUrls" classname="cn.weibo.filedownloader.BilibiliPlaybackTest" time="0.004"/>
+  <testcase name="doesNotInventAdvertisedButLockedQualities" classname="cn.weibo.filedownloader.BilibiliPlaybackTest" time="0.001"/>
+  <testcase name="requestsDesktopDashAndHighestAllowedQuality" classname="cn.weibo.filedownloader.BilibiliPlaybackTest" time="0.003"/>
+  <testcase name="preservesAndClearsAudioWhenSelectingVariants" classname="cn.weibo.filedownloader.BilibiliPlaybackTest" time="0.0"/>
+  <testcase name="keepsHigherHevcQualityAndPrefersAvcWithinSameQuality" classname="cn.weibo.filedownloader.BilibiliPlaybackTest" time="0.001"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

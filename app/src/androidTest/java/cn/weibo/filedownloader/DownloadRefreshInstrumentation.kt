@@ -858,7 +858,8 @@ class DownloadRefreshInstrumentation : Instrumentation() {
             if (requireAudio) check(tracks.any { it.startsWith("audio/") }) {
                 "Separate source audio was lost during mux: $tracks"
             }
-            if (options?.getString("requireDecodedFrame") == "true" && type == MediaType.VIDEO) {
+            if (options?.getString("requireDecodedFrame") == "true" &&
+                type in setOf(MediaType.VIDEO, MediaType.LIVE_PHOTO)) {
                 val retriever = android.media.MediaMetadataRetriever()
                 try {
                     retriever.setDataSource(targetContext, uri)
